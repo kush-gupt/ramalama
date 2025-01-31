@@ -48,7 +48,7 @@ verify_begin=".*run --rm -i --label RAMALAMA --security-opt=label=disable --name
     is "$output" "Error: MODEL was not found in the Ollama registry"
 
     run_ramalama --dryrun serve granite3.1-moe:1b
-    is "$output" "*src=granite3.1-moe:1b*" "verify ollama model name"
+    assert "$output" =~ "src=granite3.1-moe:1b" "verify ollama model name"
 }
 
 @test "ramalama --detach serve" {
