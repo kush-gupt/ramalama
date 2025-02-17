@@ -73,6 +73,8 @@ def in_existing_cache(model_name, model_tag):
 
     for cache_dir in default_ollama_caches:
         try:
+            if not os.path.exists(cache_dir):
+                continue
             manifest_path = os.path.join(cache_dir, 'manifests', 'registry.ollama.ai', model_name, model_tag)
             if os.path.exists(manifest_path):
                 with open(manifest_path, 'r') as file:
