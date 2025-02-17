@@ -31,7 +31,7 @@ load setup_suite
 
 # bats test_tags=distro-integration
 @test "ramalama pull ollama cache" {
-    ollama serve
+    ollama serve &
     ollama pull tinyllama
     run_ramalama pull tiny
     run_ramalama rm tiny
