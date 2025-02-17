@@ -72,16 +72,19 @@ def in_existing_cache(model_name, model_tag):
     ]
 
     for cache_dir in default_ollama_caches:
-        manifest_path = os.path.join(cache_dir, 'manifests', 'registry.ollama.ai', model_name, model_tag)
-        if os.path.exists(manifest_path):
-            with open(manifest_path, 'r') as file:
-                manifest_data = json.load(file)
-                for layer in manifest_data["layers"]:
-                    if layer["mediaType"] == "application/vnd.ollama.image.model":
-                        layer_digest = layer["digest"]
-                        ollama_digest_path = os.path.join(cache_dir, 'blobs', layer_digest)
-                        if os.path.exists(str(ollama_digest_path).replace(':', '-')):
-                            return str(ollama_digest_path).replace(':', '-')
+        try:
+            manifest_path = os.path.join(cache_dir, 'manifests', 'registry.ollama.ai', model_name, model_tag)
+            if os.path.exists(manifest_path):
+                with open(manifest_path, 'r') as file:
+                    manifest_data = json.load(file)
+                    for layer in manifest_data["layers"]:
+                        if layer["mediaType"] == "application/vnd.ollama.image.model":
+                            layer_digest = layer["digest"]
+                            ollama_digest_path = os.path.join(cache_dir, 'blobs', layer_digest)
+                            if os.path.exists(str(ollama_digest_path).replace(':', '-')):
+                                return str(ollama_digest_path).replace(':', '-')
+        except Exception as e:
+            print(f"exception trying to check existing ollama cache: {e}")
     return None
 
 
