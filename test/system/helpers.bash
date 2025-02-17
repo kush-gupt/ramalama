@@ -270,5 +270,11 @@ function skip_if_darwin() {
     fi
 }
 
+function skip_if_not_darwin() {
+    if [[ "$(uname)" != "Darwin" ]]; then
+	skip "Not supported except for darwin"
+    fi
+}
+
 # END   miscellaneous tools
 ###############################################################################
