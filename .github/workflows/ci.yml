@@ -38,10 +38,12 @@ jobs:
            sudo apt-get install podman bats bash codespell python3-argcomplete pipx
            make install-requirements
 
-      # - name: install ollama
-      #   shell: bash
-      #   run: |
-      #      sudo curl -fsSL https://ollama.com/install.sh | sh
+      - name: install ollama
+        shell: bash
+        run: |
+           curl -L https://ollama.com/download/ollama-linux-amd64.tgz -o ollama-linux-amd64.tgz
+           sudo tar -C /usr -xzf ollama-linux-amd64.tgz
+           ollama serve
 
       - name: Upgrade to podman 5
         run: |
@@ -74,10 +76,12 @@ jobs:
            make install-requirements
            sudo ./container-images/scripts/build_llama_and_whisper.sh
 
-      # - name: install ollama
-      #   shell: bash
-      #   run: |
-      #      sudo curl -fsSL https://ollama.com/install.sh | sh
+      - name: install ollama
+        shell: bash
+        run: |
+           curl -L https://ollama.com/download/ollama-linux-amd64.tgz -o ollama-linux-amd64.tgz
+           sudo tar -C /usr -xzf ollama-linux-amd64.tgz
+           ollama serve
 
       - name: Upgrade to podman 5
         run: |
@@ -105,10 +109,12 @@ jobs:
            sudo apt-get install bats bash codespell python3-argcomplete pipx
            make install-requirements
 
-      # - name: install ollama
-      #   shell: bash
-      #   run: |
-      #      sudo curl -fsSL https://ollama.com/install.sh | sh
+      - name: install ollama
+        shell: bash
+        run: |
+           curl -L https://ollama.com/download/ollama-linux-amd64.tgz -o ollama-linux-amd64.tgz
+           sudo tar -C /usr -xzf ollama-linux-amd64.tgz
+           ollama serve
 
       - name: Upgrade to podman 5
         run: |
@@ -158,10 +164,10 @@ jobs:
            brew install go bats bash jq llama.cpp
            make install-requirements
 
-      # - name: install ollama
-      #   shell: bash
-      #   run: |
-      #      brew install ollama
+      - name: install ollama
+        shell: bash
+        run: |
+           brew install ollama
 
       - name: Run a one-line script
         shell: bash
