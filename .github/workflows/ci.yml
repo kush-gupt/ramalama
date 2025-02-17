@@ -42,7 +42,7 @@ jobs:
         shell: bash
         run: |
            sudo curl -fsSL https://ollama.com/install.sh | sh
-           pip install -U "huggingface_hub[cli]"
+           pip install "huggingface_hub[cli]"
 
       - name: Upgrade to podman 5
         run: |
@@ -79,7 +79,7 @@ jobs:
         shell: bash
         run: |
            sudo curl -fsSL https://ollama.com/install.sh | sh
-           pip install -U "huggingface_hub[cli]"
+           pip install "huggingface_hub[cli]"
 
       - name: Upgrade to podman 5
         run: |
@@ -111,7 +111,7 @@ jobs:
         shell: bash
         run: |
            sudo curl -fsSL https://ollama.com/install.sh | sh
-           pip install -U "huggingface_hub[cli]"
+           pip install "huggingface_hub[cli]"
 
       - name: Upgrade to podman 5
         run: |
