@@ -276,5 +276,19 @@ function skip_if_not_darwin() {
     fi
 }
 
+function skip_if_no_ollama() {
+    if ! command -v ollama 2>&1 >/dev/null
+    then
+        skip "Not supported without ollama"
+    fi
+}
+
+function skip_if_no_hf-cli(){
+    if ! command -v huggingface-cli 2>&1 >/dev/null
+    then
+        skip "Not supported without huggingface-cli"
+    fi
+}
+
 # END   miscellaneous tools
 ###############################################################################

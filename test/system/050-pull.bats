@@ -31,6 +31,8 @@ load setup_suite
 
 # bats test_tags=distro-integration
 @test "ramalama pull ollama cache" {
+    skip_if_no_ollama
+    skip_if_not_darwin
     ollama serve &
     ollama pull tinyllama
     run_ramalama pull tiny
@@ -78,7 +80,7 @@ load setup_suite
 
 # bats test_tags=distro-integration
 @test "ramalama pull huggingface-cli cache" {
-
+    skip_if_no_hf-cli
     huggingface-cli download Felladrin/gguf-smollm-360M-instruct-add-basics smollm-360M-instruct-add-basics.IQ2_XXS.gguf
 
     run_ramalama pull hf://Felladrin/gguf-smollm-360M-instruct-add-basics/smollm-360M-instruct-add-basics.IQ2_XXS.gguf
