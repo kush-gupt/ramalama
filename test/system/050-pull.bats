@@ -32,7 +32,7 @@ load setup_suite
 # bats test_tags=distro-integration
 @test "ramalama pull ollama cache" {
     skip_if_no_ollama
-    skip_if_not_darwin
+    
     ollama serve &
     ollama pull tinyllama
     run_ramalama pull tiny
@@ -97,6 +97,9 @@ load setup_suite
     run_ramalama list
     is "$output" ".*Felladrin/gguf-smollm-360M-instruct-add-basics/smollm-360M-instruct-add-basics.IQ2_XXS" "image was actually pulled locally from hf-cli cache"
     run_ramalama rm huggingface://Felladrin/gguf-smollm-360M-instruct-add-basics/smollm-360M-instruct-add-basics.IQ2_XXS.gguf
+
+    rm -rf ~/.cache/huggingface/hub/models--Felladrin--gguf-smollm-360M-instruct-add-basics
+
 }
 
 # bats test_tags=distro-integration
