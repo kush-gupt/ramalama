@@ -34,6 +34,7 @@ load setup_suite
     skip_if_no_ollama
     
     ollama serve &
+    sleep 5
     ollama pull tinyllama
     run_ramalama pull tiny
     run_ramalama rm tiny
