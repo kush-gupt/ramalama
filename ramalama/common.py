@@ -85,7 +85,7 @@ def exec_cmd(args, debug=False):
         raise
 
 
-def run_cmd(args, cwd=None, stdout=subprocess.PIPE, ignore_stderr=False, ignore_all=False, debug=False):
+def run_cmd(args, cwd=None, stdout=subprocess.PIPE, ignore_stderr=False, ignore_all=False, debug=False, stdin=None):
     """
     Run the given command arguments.
 
@@ -96,12 +96,19 @@ def run_cmd(args, cwd=None, stdout=subprocess.PIPE, ignore_stderr=False, ignore_
     ignore_stderr: if True, ignore standard error
     ignore_all: if True, ignore both standard output and standard error
     debug: if True, print debug information
+    stdin: optional stdin configuration
     """
     if debug:
         perror("run_cmd: ", *args)
         perror(f"Working directory: {cwd}")
         perror(f"Ignore stderr: {ignore_stderr}")
         perror(f"Ignore all: {ignore_all}")
+
+    if stdin is None:
+        if not sys.stdin.isatty():
+            stdin = subprocess.DEVNULL
+            if debug:
+                perror("Non-interactive environment detected, redirecting stdin to DEVNULL")
 
     serr = None
     if ignore_all or ignore_stderr:
@@ -111,7 +118,7 @@ def run_cmd(args, cwd=None, stdout=subprocess.PIPE, ignore_stderr=False, ignore_
     if ignore_all:
         sout = subprocess.DEVNULL
 
-    result = subprocess.run(args, check=True, cwd=cwd, stdout=sout, stderr=serr)
+    result = subprocess.run(args, check=True, cwd=cwd, stdout=sout, stderr=serr, stdin=stdin)
     if debug:
         print("Command finished with return code:", result.returncode)
 
