@@ -2,6 +2,7 @@ import json
 import os
 import subprocess
 import tempfile
+from datetime import datetime
 
 import ramalama.annotations as annotations
 from ramalama.common import MNT_FILE, engine_version, exec_cmd, perror, run_cmd
@@ -33,7 +34,7 @@ def list_manifests(args):
         "manifest=true",
         "--format",
         '{"name":"oci://{{ .Repository }}:{{ .Tag }}","modified":"{{ .CreatedAt }}",\
-        "size":"{{ .Size }}", "ID":"{{ .ID }}"},',
+        "size":{{ .VirtualSize }}, "ID":"{{ .ID }}"},',
     ]
     output = run_cmd(conman_args, debug=args.debug).stdout.decode("utf-8").strip()
     if output == "":
@@ -79,30 +80,56 @@ def list_models(args):
     if conman is None:
         return []
 
+    # if engine is docker, size will be retrieved from the inspect command later
+    # if engine is podman use "size":{{ .VirtualSize }}
+    formatLine = '{"name":"oci://{{ .Repository }}:{{ .Tag }}","modified":"{{ .CreatedAt }}"'
+    if conman == "podman":
+        formatLine += ',"size":{{ .VirtualSize }}},'
+    else:
+        formatLine += ',"id":"{{ .ID }}"},'
+
     conman_args = [
         conman,
         "images",
         "--filter",
         f"label={ocilabeltype}",
         "--format",
-        '{"name":"oci://{{ .Repository }}:{{ .Tag }}","modified":"{{ .CreatedAt }}","size":"{{ .Size }}"},',
+        formatLine,
     ]
     output = run_cmd(conman_args, debug=args.debug).stdout.decode("utf-8").strip()
     if output == "":
         return []
+
     models = json.loads("[" + output[:-1] + "]")
+    # Grab the size from the inspect command
+    if conman == "docker":
+        # grab the size from the inspect command
+        for model in models:
+            conman_args = [conman, "image", "inspect", model["id"], "--format", "{{.Size}}"]
+            output = run_cmd(conman_args, debug=args.debug).stdout.decode("utf-8").strip()
+            # convert the number value from the string output
+            model["size"] = int(output)
+            # drop the id from the model
+            del model["id"]
+
     models += list_manifests(args)
+    for model in models:
+        # Convert to ISO 8601 format
+        parsed_date = datetime.fromisoformat(model["modified"].replace(" UTC", "").replace(" ", "T"))
+        model["modified"] = parsed_date.isoformat()
+
     return models
 
 
 class OCI(Model):
-    def __init__(self, model, conman):
+    def __init__(self, model, conman, ignore_stderr=False):
         super().__init__(model.removeprefix(prefix).removeprefix("docker://"))
         for t in MODEL_TYPES:
             if self.model.startswith(t + "://"):
                 raise ValueError(f"{model} invalid: Only OCI Model types supported")
         self.type = "OCI"
         self.conman = conman
+        self.ignore_stderr = ignore_stderr
 
     def login(self, args):
         conman_args = [self.conman, "login"]
@@ -278,17 +305,20 @@ Tagging build instead"""
             raise e
 
     def pull(self, args):
-        print(f"Downloading {self.model}...")
+        if not args.quiet:
+            print(f"Downloading {self.model}...")
         if not args.engine:
             raise NotImplementedError("OCI images require a container engine like Podman or Docker")
 
         conman_args = [args.engine, "pull"]
+        if args.quiet:
+            conman_args.extend(['--quiet'])
         if str(args.tlsverify).lower() == "false":
             conman_args.extend([f"--tls-verify={args.tlsverify}"])
         if args.authfile:
             conman_args.extend([f"--authfile={args.authfile}"])
         conman_args.extend([self.model])
-        run_cmd(conman_args, debug=args.debug)
+        run_cmd(conman_args, debug=args.debug, ignore_stderr=self.ignore_stderr)
         return MNT_FILE
 
     def _registry_reference(self):
@@ -324,10 +354,10 @@ Tagging build instead"""
 
         try:
             conman_args = [self.conman, "manifest", "rm", self.model]
-            run_cmd(conman_args, debug=args.debug, ignore_stderr=ignore_stderr)
+            run_cmd(conman_args, debug=args.debug, ignore_stderr=self.ignore_stderr)
         except subprocess.CalledProcessError:
             conman_args = [self.conman, "rmi", f"--force={args.ignore}", self.model]
-            run_cmd(conman_args, debug=args.debug, ignore_stderr=ignore_stderr)
+            run_cmd(conman_args, debug=args.debug, ignore_stderr=self.ignore_stderr)
 
     def exists(self, args):
         try:
@@ -342,7 +372,7 @@ Tagging build instead"""
 
         conman_args = [self.conman, "image", "inspect", self.model]
         try:
-            run_cmd(conman_args, debug=args.debug)
+            run_cmd(conman_args, debug=args.debug, ignore_stderr=self.ignore_stderr)
             return self.model
         except Exception:
             return None

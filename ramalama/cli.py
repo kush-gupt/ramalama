@@ -4,20 +4,18 @@ import json
 import os
 import platform
 import subprocess
-import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 import ramalama.oci
 import ramalama.rag
 from ramalama.common import container_manager, default_image, perror, run_cmd
 from ramalama.gpu_detector import GPUDetector
-from ramalama.huggingface import Huggingface
 from ramalama.model import MODEL_TYPES
+from ramalama.model_factory import ModelFactory
 from ramalama.oci import OCI
-from ramalama.ollama import Ollama
 from ramalama.shortnames import Shortnames
 from ramalama.toml_parser import TOMLParser
-from ramalama.url import URL
 from ramalama.version import print_version, version
 
 shortnames = Shortnames()
@@ -166,14 +164,12 @@ def configure_arguments(parser):
 The RAMALAMA_IN_CONTAINER environment variable modifies default behaviour.""",
     )
     parser.add_argument(
-        "--debug",
+        "--dryrun",
+        "--dry-run",
+        dest="dryrun",
         action="store_true",
-        help="display debug messages",
+        help="show container runtime command without executing it",
     )
-    parser.add_argument(
-        "--dryrun", dest="dryrun", action="store_true", help="show container runtime command without executing it"
-    )
-    parser.add_argument("--dry-run", dest="dryrun", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument(
         "--engine",
         dest="engine",
@@ -213,7 +209,13 @@ The RAMALAMA_IN_CONTAINER environment variable modifies default behaviour.""",
         default=config.get("store"),
         help="store AI Models in the specified directory",
     )
-    parser.add_argument("-v", "--version", dest="version", action="store_true", help="show RamaLama version")
+    verbosity_group = parser.add_mutually_exclusive_group()
+    verbosity_group.add_argument("--quiet", "-q", dest="quiet", action="store_true", help="reduce output.")
+    verbosity_group.add_argument(
+        "--debug",
+        action="store_true",
+        help="display debug messages",
+    )
 
 
 def configure_subcommands(parser):
@@ -457,7 +459,7 @@ def bench_parser(subparsers):
         dest="ngl",
         type=int,
         default=config.get("ngl", -1),
-        help="Number of layers to offload to the gpu, if available",
+        help="number of layers to offload to the gpu, if available",
     )
     parser.add_argument("MODEL")  # positional argument
     parser.set_defaults(func=bench_cli)
@@ -514,7 +516,6 @@ def list_parser(subparsers):
     parser.add_argument("--container", default=False, action="store_false", help=argparse.SUPPRESS)
     parser.add_argument("--json", dest="json", action="store_true", help="print using json")
     parser.add_argument("-n", "--noheading", dest="noheading", action="store_true", help="do not display heading")
-    parser.add_argument("-q", "--quiet", dest="quiet", action="store_true", help="print only Model names")
     parser.set_defaults(func=list_cli)
 
 
@@ -530,7 +531,7 @@ def human_readable_size(size):
 
 
 def get_size(file):
-    return human_readable_size(os.path.getsize(file))
+    return os.path.getsize(file)
 
 
 def _list_models(args):
@@ -546,7 +547,8 @@ def _list_models(args):
             else:
                 name = str(path).replace("/", "://", 1)
             file_epoch = path.lstat().st_mtime
-            modified = int(time.time() - file_epoch)
+            # convert to iso format
+            modified = datetime.fromtimestamp(file_epoch, tz=timezone.utc).isoformat()
             size = get_size(path)
 
             # Store data for later use
@@ -606,24 +608,25 @@ def list_cli(args):
     size_width = len("SIZE")
     for model in sorted(models, key=lambda d: d['name']):
         try:
-            modified = human_duration(model["modified"]) + " ago"
+            delta = int(datetime.now(timezone.utc).timestamp() - datetime.fromisoformat(model["modified"]).timestamp())
+            modified = human_duration(delta) + " ago"
+            model["modified"] = modified
         except TypeError:
-            modified = model["modified"]
+            pass
+        # update the size to be human readable
+        model["size"] = human_readable_size(model["size"])
         name_width = max(name_width, len(model["name"]))
-        modified_width = max(modified_width, len(modified))
+        modified_width = max(modified_width, len(model["modified"]))
         size_width = max(size_width, len(model["size"]))
 
     if not args.quiet and not args.noheading and not args.json:
         print(f"{'NAME':<{name_width}} {'MODIFIED':<{modified_width}} {'SIZE':<{size_width}}")
 
     for model in models:
-        try:
-            modified = human_duration(model["modified"]) + " ago"
-        except TypeError:
-            modified = model["modified"]
         if args.quiet:
             print(model["name"])
         else:
+            modified = model['modified']
             print(f"{model['name']:<{name_width}} {modified:<{modified_width}} {model['size'].upper():<{size_width}}")
 
 
@@ -788,7 +791,7 @@ def run_serve_perplexity_args(parser):
         help="size of the prompt context (0 = loaded from model)",
     )
     parser.add_argument(
-        "--device", dest="device", action='append', type=str, help="Device to leak in to the running container"
+        "--device", dest="device", action='append', type=str, help="device to leak in to the running container"
     )
     parser.add_argument("-n", "--name", dest="name", help="name of container in which the Model will be run")
     parser.add_argument(
@@ -796,10 +799,18 @@ def run_serve_perplexity_args(parser):
         dest="ngl",
         type=int,
         default=config.get("ngl", -1),
-        help="Number of layers to offload to the gpu, if available",
+        help="number of layers to offload to the gpu, if available",
     )
     parser.add_argument(
         "--privileged", dest="privileged", action="store_true", help="give extended privileges to container"
+    )
+    parser.add_argument(
+        "--pull",
+        dest="pull",
+        type=str,
+        default=config.get('pull', "newer"),
+        choices=["always", "missing", "never", "newer"],
+        help='pull image policy',
     )
     parser.add_argument("--seed", help="override random seed")
     parser.add_argument(
@@ -817,18 +828,27 @@ def run_parser(subparsers):
     parser = subparsers.add_parser("run", help="run specified AI Model as a chatbot")
     run_serve_perplexity_args(parser)
     add_network_argument(parser)
-    parser.add_argument("--keepalive", type=str, help="Duration to keep a model loaded (e.g. 5m)")
+    parser.add_argument("--keepalive", type=str, help="duration to keep a model loaded (e.g. 5m)")
     parser.add_argument("MODEL")  # positional argument
     parser.add_argument(
-        "ARGS", nargs="*", help="Overrides the default prompt, and the output is returned without entering the chatbot"
+        "ARGS", nargs="*", help="overrides the default prompt, and the output is returned without entering the chatbot"
     )
     parser._actions.sort(key=lambda x: x.option_strings)
     parser.set_defaults(func=run_cli)
 
 
 def run_cli(args):
-    model = New(args.MODEL, args)
-    model.run(args)
+    try:
+        model = New(args.MODEL, args)
+        model.run(args)
+
+    except KeyError as e:
+        try:
+            args.quiet = True
+            model = OCI(args.MODEL, args.engine, ignore_stderr=True)
+            model.run(args)
+        except Exception:
+            raise e
 
 
 def serve_parser(subparsers):
@@ -852,8 +872,17 @@ def serve_parser(subparsers):
 def serve_cli(args):
     if not args.container:
         args.detach = False
-    model = New(args.MODEL, args)
-    model.serve(args)
+
+    try:
+        model = New(args.MODEL, args)
+        model.serve(args)
+    except KeyError as e:
+        try:
+            args.quiet = True
+            model = OCI(args.MODEL, args.engine, ignore_stderr=True)
+            model.serve(args)
+        except Exception:
+            raise e
 
 
 def stop_parser(subparsers):
@@ -958,8 +987,8 @@ def _rm_model(models, args):
                         raise e
             try:
                 # attempt to remove as a container image
-                m = OCI(model, args.engine)
-                m.remove(args, ignore_stderr=True)
+                m = OCI(model, args.engine, ignore_stderr=True)
+                m.remove(args)
                 return
             except Exception:
                 pass
@@ -982,24 +1011,7 @@ def rm_cli(args):
 
 
 def New(model, args):
-    if model.startswith("huggingface://") or model.startswith("hf://") or model.startswith("hf.co/"):
-        return Huggingface(model)
-    if model.startswith("ollama://") or "ollama.com/library/" in model:
-        return Ollama(model)
-    if model.startswith("oci://") or model.startswith("docker://"):
-        return OCI(model, args.engine)
-    if model.startswith("http://") or model.startswith("https://") or model.startswith("file://"):
-        return URL(model)
-
-    transport = config.get("transport", "ollama")
-    if transport == "huggingface":
-        return Huggingface(model)
-    if transport == "ollama":
-        return Ollama(model)
-    if transport == "oci":
-        return OCI(model, args.engine)
-
-    raise KeyError(f'transport "{transport}" not supported. Must be oci, huggingface, or ollama.')
+    return ModelFactory(model, config.get("transport", "ollama"), args.engine).create()
 
 
 def perplexity_parser(subparsers):

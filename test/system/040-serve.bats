@@ -16,12 +16,13 @@ verify_begin=".*run --rm -i --label ai.ramalama --name"
 
 	run_ramalama --dryrun serve --name foobar ${model}
 	is "$output" "${verify_begin} foobar .*" "dryrun correct with --name"
+	assert "$output" !~ ".*--network" "--network is not part of the output"
 	assert "$output" =~ ".*--host 0.0.0.0" "verify host 0.0.0.0 is added when run within container"
 	is "$output" ".*${model}" "verify model name"
 	assert "$output" !~ ".*--seed" "assert seed does not show by default"
 
-	run_ramalama --dryrun serve --host 127.1.2.3 --name foobar ${model}
-	assert "$output" =~ ".*--host 127.1.2.3" "verify --host is modified when run within container"
+	run_ramalama --dryrun serve --network bridge --host 127.1.2.3 --name foobar ${model}
+	assert "$output" =~ "--network bridge.*--host 127.1.2.3" "verify --host is modified when run within container"
 	is "$output" ".*${model}" "verify model name"
 	is "$output" ".*--temp 0.8" "verify temp is set"
 
@@ -30,8 +31,17 @@ verify_begin=".*run --rm -i --label ai.ramalama --name"
 
 	run_ramalama --dryrun serve --seed 1234 ${model}
 	is "$output" ".*--seed 1234" "verify seed is set"
+	if not_docker; then
+	   is "$output" ".*--pull=newer" "verify pull is newer"
+	fi
 	assert "$output" =~ ".*--cap-drop=all" "verify --cap-add is present"
 	assert "$output" =~ ".*no-new-privileges" "verify --no-new-privs is not present"
+
+	run_ramalama --dryrun serve --pull=never ${model}
+	is "$output" ".*--pull=never" "verify pull is never"
+
+	run_ramalama 2 --dryrun serve --pull=bogus ${model}
+	is "$output" ".*error: argument --pull: invalid choice: 'bogus'" "verify pull can not be bogus"
 
 	if is_container; then
 	    run_ramalama --dryrun serve --privileged ${model}
@@ -229,11 +239,11 @@ verify_begin=".*run --rm -i --label ai.ramalama --name"
 	is "$output" ".*command: \[\"--port\"\]" "command is correct"
 	is "$output" ".*args: \['1234', '--model', '/mnt/models/model.file', '--max_model_len', '2048'\]" "args are correct"
 
-	is "$output" ".*image: quay.io/ramalama/ramalama" "image is correct"
 	is "$output" ".*reference: ${ociimage}" "AI image should be created"
 	is "$output" ".*pullPolicy: IfNotPresent" "pullPolicy should exist"
 
 	run_ramalama rm oci://${ociimage}
+	rm $name.yaml
     done
     stop_registry
 }
@@ -247,7 +257,6 @@ verify_begin=".*run --rm -i --label ai.ramalama --name"
     is "$output" ".*Generating Kubernetes YAML file: ${name}.yaml" "generate .yaml file"
 
     run cat $name.yaml
-    is "$output" ".*image: quay.io/ramalama/ramalama" "Should container image"
     is "$output" ".*command: \[\"llama-server\"\]" "Should command"
     is "$output" ".*containerPort: 1234" "Should container container port"
 
@@ -264,7 +273,6 @@ verify_begin=".*run --rm -i --label ai.ramalama --name"
     is "$output" ".*Generating quadlet file: ${name}.kube" "generate .kube file"
 
     run cat $name.yaml
-    is "$output" ".*image: quay.io/ramalama/ramalama" "Should container image"
     is "$output" ".*command: \[\"llama-server\"\]" "Should command"
     is "$output" ".*containerPort: 1234" "Should container container port"
 
@@ -278,6 +286,8 @@ verify_begin=".*run --rm -i --label ai.ramalama --name"
 
     run cat $name.kube
     is "$output" ".*Yaml=$name.yaml" "Should container container port"
+    rm $name.kube
+    rm $name.yaml
 }
 
 # vim: filetype=sh

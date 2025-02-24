@@ -130,6 +130,9 @@ Needed to access the gpu on some systems, but has an impact on security, use wit
 do not run RamaLama in the default container (default: False)
 The default can be overridden in the ramalama.conf file.
 
+#### **--quiet**
+Decrease output verbosity.
+
 #### **--runtime**=*llama.cpp* | *vllm*
 specify the runtime to use, valid options are 'llama.cpp' and 'vllm' (default: llama.cpp)
 The default can be overridden in the ramalama.conf file.
@@ -137,9 +140,6 @@ The default can be overridden in the ramalama.conf file.
 #### **--store**=STORE
 store AI Models in the specified directory (default rootless: `$HOME/.local/share/ramalama`, default rootful: `/var/lib/ramalama`)
 The default can be overridden in the ramalama.conf file.
-
-#### **--version**, **-v**
-show RamaLama version
 
 ## COMMANDS
 
@@ -174,6 +174,21 @@ Distributions ship the `/usr/share/ramalama/ramalama.conf` file with their defau
 RamaLama uses builtin defaults if no ramalama.conf file is found.
 
 If the **RAMALAMA_CONFIG** environment variable is set, then its value is used for the ramalama.conf file rather than the default.
+
+## ENVIRONMENT VARIABLES
+
+RamaLama default behaviour can also be overridden via environment variables,
+although the recommended way is to use the ramalama.conf file.
+
+| ENV Name                  | Description                                |
+| ------------------------- | ------------------------------------------ |
+| RAMALAMA_CONFIG           | specific configuration file to be used     |
+| RAMALAMA_CONTAINER_ENGINE | container engine (Podman/Docker) to use    |
+| RAMALAMA_FORCE_EMOJI      | define whether `ramalama run` uses EMOJI   |
+| RAMALAMA_IMAGE            | container image to use for serving AI Model|
+| RAMALAMA_IN_CONTAINER     | Run RamaLama in the default container      |
+| RAMALAMA_STORE            | location to store AI Models                |
+| RAMALAMA_TRANSPORT        | default AI Model transport (ollama, huggingface, OCI) |
 
 ## SEE ALSO
 **[podman(1)](https://github.com/containers/podman/blob/main/docs/podman.1.md)**, **docker(1)**, **[ramalama.conf(5)](ramalama.conf.5.md)**

@@ -36,7 +36,46 @@ with the default RamaLama
 $(error)s"""
 
 
-class Model:
+class ModelBase:
+
+    def __not_implemented_error(self, param):
+        return NotImplementedError(f"ramalama {param} for '{type(self).__name__}' not implemented")
+
+    def login(self, args):
+        raise self.__not_implemented_error("login")
+
+    def logout(self, args):
+        raise self.__not_implemented_error("logout")
+
+    def pull(self, args):
+        raise self.__not_implemented_error("pull")
+
+    def push(self, source, args):
+        raise self.__not_implemented_error("push")
+
+    def remove(self, args):
+        raise self.__not_implemented_error("rm")
+
+    def bench(self, args):
+        raise self.__not_implemented_error("bench")
+
+    def run(self, args):
+        raise self.__not_implemented_error("run")
+
+    def perplexity(self, args):
+        raise self.__not_implemented_error("perplexity")
+
+    def serve(self, args):
+        raise self.__not_implemented_error("serve")
+
+    def exists(self, args):
+        raise self.__not_implemented_error("exists")
+
+    def inspect(self, args):
+        raise self.__not_implemented_error("inspect")
+
+
+class Model(ModelBase):
     """Model super class"""
 
     model = ""
@@ -47,18 +86,6 @@ class Model:
         split = self.model.rsplit("/", 1)
         self.directory = split[0] if len(split) > 1 else ""
         self.filename = split[1] if len(split) > 1 else split[0]
-
-    def login(self, args):
-        raise NotImplementedError(f"ramalama login for {self.type} not implemented")
-
-    def logout(self, args):
-        raise NotImplementedError(f"ramalama logout for {self.type} not implemented")
-
-    def pull(self, args):
-        raise NotImplementedError(f"ramalama pull for {self.type} not implemented")
-
-    def push(self, source, args):
-        raise NotImplementedError(f"ramalama push for {self.type} not implemented")
 
     def is_symlink_to(self, file_path, target_path):
         if os.path.islink(file_path):
@@ -108,8 +135,6 @@ class Model:
 
         except Exception:
             return False
-
-        return False
 
     def _image(self, args):
         if args.image != DEFAULT_IMAGE:
@@ -187,15 +212,24 @@ class Model:
             container_labels += ["--label", f"ai.ramalama.command={args.subcommand}"]
         conman_args.extend(container_labels)
 
-        if os.path.basename(args.engine) == "podman":
-            conman_args += ["--pull=newer"]
-            if args.podman_keep_groups:
-                conman_args += ["--group-add", "keep-groups"]
-        elif os.path.basename(args.engine) == "docker":
+        # if args.subcommand is run add LLAMA_PROMPT_PREFIX to the container
+        if hasattr(args, "subcommand") and args.subcommand == "run":
+            # if podman
+            if os.path.basename(args.engine) == "podman":
+                conman_args += ["--env", "LLAMA_PROMPT_PREFIX=🦭 > "]
+            elif os.path.basename(args.engine) == "docker":
+                conman_args += ["--env", "LLAMA_PROMPT_PREFIX=🐋 > "]
+
+        if os.path.basename(args.engine) == "podman" and args.podman_keep_groups:
+            conman_args += ["--group-add", "keep-groups"]
+
+        if os.path.basename(args.engine) == "docker" and args.pull == "newer":
             try:
                 run_cmd([args.engine, "pull", "-q", args.image], ignore_all=True)
             except Exception:  # Ignore errors, the run command will handle it.
                 pass
+        else:
+            conman_args += [f"--pull={args.pull}"]
 
         if sys.stdout.isatty() or sys.stdin.isatty():
             conman_args += ["-t"]
@@ -227,15 +261,17 @@ class Model:
 
     def gpu_args(self, args, runner=False):
         gpu_args = []
+        machine = platform.machine()
         if (
             os.getenv("HIP_VISIBLE_DEVICES")
             or os.getenv("ASAHI_VISIBLE_DEVICES")
             or os.getenv("CUDA_VISIBLE_DEVICES")
             or os.getenv("INTEL_VISIBLE_DEVICES")
             or (
-                # linux and macOS report aarch64 differently
-                platform.machine() in {"aarch64", "arm64"}
-                and os.path.exists("/dev/dri")
+                # linux and macOS report aarch64 differently, on Apple Silicon
+                # (arm64), we should have acceleration on regardless.
+                machine == "arm64"
+                or (machine == "aarch64" and os.path.exists("/dev/dri"))
             )
         ):
             if args.ngl < 0:
@@ -354,6 +390,11 @@ class Model:
 
     def build_exec_args_run(self, args, model_path, prompt):
         exec_model_path = model_path if not args.container else MNT_FILE
+
+        # override prompt if not set to the local call
+        if "LLAMA_PROMPT_PREFIX" not in os.environ:
+            os.environ["LLAMA_PROMPT_PREFIX"] = "🦙 > "
+
         exec_args = ["llama-run", "-c", f"{args.context}", "--temp", f"{args.temp}"]
 
         if args.seed:
@@ -444,6 +485,7 @@ class Model:
         return exec_args
 
     def generate_container_config(self, model_path, args, exec_args):
+        self.image = self._image(args)
         if args.generate == "quadlet":
             self.quadlet(model_path, args, exec_args)
         elif args.generate == "kube":
@@ -485,17 +527,17 @@ class Model:
         self.execute_command(model_path, exec_args, args)
 
     def quadlet(self, model, args, exec_args):
-        quadlet = Quadlet(model, args, exec_args)
+        quadlet = Quadlet(model, self.image, args, exec_args)
         quadlet.generate()
 
     def quadlet_kube(self, model, args, exec_args):
-        kube = Kube(model, args, exec_args)
+        kube = Kube(model, self.image, args, exec_args)
         kube.generate()
-        quadlet = Quadlet(model, args, exec_args)
+        quadlet = Quadlet(model, self.image, args, exec_args)
         quadlet.kube()
 
     def kube(self, model, args, exec_args):
-        kube = Kube(model, args, exec_args)
+        kube = Kube(model, self.image, args, exec_args)
         kube.generate()
 
     def path(self, args):
