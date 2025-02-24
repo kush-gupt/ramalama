@@ -60,7 +60,7 @@ jobs:
            curl -L https://ollama.com/download/ollama-linux-amd64.tgz -o ollama-linux-amd64.tgz
            sudo tar -C /usr -xzf ollama-linux-amd64.tgz
            sudo useradd -r -s /bin/false -U -m -d /usr/share/ollama ollama
-           sudo usermod -a -G ollama $(whoami)
+           sudo usermod -a -G ollama runner
 
       - name: Upgrade to podman 5
         run: |
@@ -99,7 +99,7 @@ jobs:
            curl -L https://ollama.com/download/ollama-linux-amd64.tgz -o ollama-linux-amd64.tgz
            sudo tar -C /usr -xzf ollama-linux-amd64.tgz
            sudo useradd -r -s /bin/false -U -m -d /usr/share/ollama ollama
-           sudo usermod -a -G ollama $(whoami)
+           sudo usermod -a -G ollama runner
 
       - name: Upgrade to podman 5
         run: |
@@ -133,7 +133,7 @@ jobs:
            curl -L https://ollama.com/download/ollama-linux-amd64.tgz -o ollama-linux-amd64.tgz
            sudo tar -C /usr -xzf ollama-linux-amd64.tgz
            sudo useradd -r -s /bin/false -U -m -d /usr/share/ollama ollama
-           sudo usermod -a -G ollama $(whoami)
+           sudo usermod -a -G ollama runner
 
       - name: Upgrade to podman 5
         run: |
