@@ -34,7 +34,7 @@ load setup_suite
     skip_if_no_ollama
     
     ollama serve &
-    sleep 5
+    sleep 3
     ollama pull tinyllama
     run_ramalama pull tiny
     run_ramalama rm tiny
@@ -43,6 +43,7 @@ load setup_suite
     run_ramalama pull https://ollama.com/library/smollm:135m
     run_ramalama list
     is "$output" ".*ollama://smollm:135m" "image was actually pulled locally from ollama cache"
+    ollama rm smollm:135m
 
     ollama pull smollm:360m
     RAMALAMA_TRANSPORT=ollama run_ramalama pull smollm:360m
@@ -50,10 +51,13 @@ load setup_suite
     run_ramalama list
     is "$output" ".*ollama://smollm:360m" "image was actually pulled locally from ollama cache"
     run_ramalama rm ollama://smollm:135m ollama://smollm:360m
+    ollama rm smollm:360m
 
     random_image_name=i_$(safename)
     run_ramalama 1 pull ${random_image_name}
     is "$output" "Error: ${random_image_name} was not found in the Ollama registry"
+
+    sudo killall -s 9 ollama
 }
 
 # bats test_tags=distro-integration
