@@ -56,7 +56,7 @@ load setup_suite
     run_ramalama 1 pull ${random_image_name}
     is "$output" "Error: ${random_image_name} was not found in the Ollama registry"
 
-    sudo pkill -s 9 ollama
+    sudo pkill ollama
 }
 
 # bats test_tags=distro-integration
