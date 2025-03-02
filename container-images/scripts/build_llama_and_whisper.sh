@@ -21,7 +21,7 @@ dnf_install() {
   local vulkan_rpms=("vulkan-headers" "vulkan-loader-devel" "vulkan-tools" \
                      "spirv-tools" "glslc" "glslang")
   if [ "$containerfile" = "ramalama" ] || [ "$containerfile" = "rocm" ] || \
-    [ "$containerfile" = "vulkan" ]; then # All the UBI-based ones
+    [ "$containerfile" = "vulkan" ] || [ "$containerfile" = "convert" ]; then # All the UBI-based ones
     local url="https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm"
     dnf install -y "$url"
     crb enable # this is in epel-release, can only install epel-release via url
@@ -117,6 +117,10 @@ clone_and_build_llama_cpp() {
   cd llama.cpp
   git submodule update --init --recursive
   git reset --hard "$llama_cpp_sha"
+  if [ "$containerfile" = "convert" ]; then
+    pip install ./gguf-py
+    pip install -r ./requirements/requirements-convert_hf_to_gguf.txt
+  fi
   cmake_steps "${common_flags[@]}"
   cd ..
   rm -rf llama.cpp
