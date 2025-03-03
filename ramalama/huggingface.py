@@ -1,7 +1,7 @@
+import json
 import os
 import pathlib
 import urllib.request
-import json
 
 from ramalama.common import available, download_file, exec_cmd, perror, run_cmd, verify_checksum
 from ramalama.model import Model
