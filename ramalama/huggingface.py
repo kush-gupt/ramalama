@@ -34,7 +34,7 @@ def fetch_checksum_from_api(url):
 
 
 def get_repo_info(repo_name):
-    # Docs on API call here: 
+    # Docs on API call here:
     # https://huggingface.co/docs/hub/en/api#get-apimodelsrepoid-or-apimodelsrepoidrevisionrevision
     repo_info_url = f"https://huggingface.co/api/models/{repo_name}"
     with urllib.request.urlopen(repo_info_url) as response:
