@@ -32,17 +32,18 @@ def fetch_checksum_from_api(url):
             return line.split(":", 1)[1].strip()
     raise ValueError("SHA-256 checksum not found in the API response.")
 
+
 def get_repo_info(repo_name):
-        # Docs on API call here: https://huggingface.co/docs/hub/en/api#get-apimodelsrepoid-or-apimodelsrepoidrevisionrevision
-        repo_info_url = f"https://huggingface.co/api/models/{repo_name}"
-        with urllib.request.urlopen(repo_info_url) as response:
-            if response.getcode() == 200:
-                repo_info = response.read().decode('utf-8')
-                return json.loads(repo_info)
-            else:
-                perror("Huggingface repo information pull failed")
-                raise KeyError(f"Response error code from repo info pull: {response.getcode()}")
-        return None
+    # Docs on API call here: https://huggingface.co/docs/hub/en/api#get-apimodelsrepoid-or-apimodelsrepoidrevisionrevision
+    repo_info_url = f"https://huggingface.co/api/models/{repo_name}"
+    with urllib.request.urlopen(repo_info_url) as response:
+        if response.getcode() == 200:
+            repo_info = response.read().decode('utf-8')
+            return json.loads(repo_info)
+        else:
+            perror("Huggingface repo information pull failed")
+            raise KeyError(f"Response error code from repo info pull: {response.getcode()}")
+    return None
 
 
 class Huggingface(Model):
@@ -83,9 +84,13 @@ class Huggingface(Model):
                 repo_info = get_repo_info(repo_name)
                 if "safetensors" in repo_info:
                     if args.runtime == "llama.cpp":
-                        print("\nllama.cpp does not support running safetensor models, please use a/convert to the GGUF format using:\n- https://huggingface.co/spaces/ggml-org/gguf-my-repo \n")
+                        print(
+                            "\nllama.cpp does not support running safetensor models, please use a/convert to the GGUF format using:\n- https://huggingface.co/spaces/ggml-org/gguf-my-repo \n"
+                        )
                 if "gguf" in repo_info:
-                    print("There are GGUF files to choose in this repo, run one of the following commands to choose one:")
+                    print(
+                        "There are GGUF files to choose in this repo, run one of the following commands to choose one:"
+                    )
                     for sibling in repo_info["siblings"]:
                         if sibling["rfilename"].endswith('.gguf'):
                             file = sibling["rfilename"]
