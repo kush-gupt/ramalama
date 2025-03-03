@@ -83,17 +83,17 @@ class Huggingface(Model):
             if self.directory.count("/") == 0:
                 repo_name = self.directory + "/" + self.filename
                 repo_info = get_repo_info(repo_name)
-                if "safetensors" in repo_info:
-                    if args.runtime == "llama.cpp":
-                        print(
-                            "\n \
-                            llama.cpp does not support running safetensor models, \
+                if "safetensors" in repo_info and args.runtime == "llama.cpp":
+                    print(
+                        "\n \
+                        llama.cpp does not support running safetensor models, \
                             please use a/convert to the GGUF format using:\n \
-                            - https://huggingface.co/spaces/ggml-org/gguf-my-repo \n"
-                        )
+                                - https://huggingface.co/spaces/ggml-org/gguf-my-repo \n"
+                    )
                 if "gguf" in repo_info:
                     print(
-                        "There are GGUF files to choose in this repo, run one of the following commands to choose one:"
+                        "There are GGUF files to choose in this repo, \
+                            run one of the following commands to choose one:"
                     )
                     for sibling in repo_info["siblings"]:
                         if sibling["rfilename"].endswith('.gguf'):
