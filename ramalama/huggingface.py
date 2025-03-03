@@ -47,6 +47,22 @@ def get_repo_info(repo_name):
     return None
 
 
+def handle_repo_info(repo_name, repo_info, runtime):
+    if "safetensors" in repo_info and runtime == "llama.cpp":
+        print(
+            "\nllama.cpp does not support running safetensor models, "
+            "please use a/convert to the GGUF format using:\n"
+            "- https://huggingface.co/spaces/ggml-org/gguf-my-repo"
+        )
+    if "gguf" in repo_info:
+        print("There are GGUF files to choose from in this repo, run one of the following commands to choose one:\n")
+    for sibling in repo_info["siblings"]:
+        if sibling["rfilename"].endswith('.gguf'):
+            file = sibling["rfilename"]
+            print(f"- ramalama pull hf://{repo_name}/{file}")
+    print("\n")
+
+
 class Huggingface(Model):
     def __init__(self, model):
         super().__init__(model)
@@ -83,24 +99,7 @@ class Huggingface(Model):
             if self.directory.count("/") == 0:
                 repo_name = self.directory + "/" + self.filename
                 repo_info = get_repo_info(repo_name)
-                if "safetensors" in repo_info and args.runtime == "llama.cpp":
-                    print(
-                        "\n \
-                        llama.cpp does not support running safetensor models, \
-                            please use a/convert to the GGUF format using:\n \
-                                - https://huggingface.co/spaces/ggml-org/gguf-my-repo \n"
-                    )
-                if "gguf" in repo_info:
-                    print(
-                        "There are GGUF files to choose in this repo, \
-                            run one of the following commands to choose one:"
-                    )
-                    for sibling in repo_info["siblings"]:
-                        if sibling["rfilename"].endswith('.gguf'):
-                            file = sibling["rfilename"]
-                            print(f"- ramalama pull hf://{repo_name}/{file}")
-                    print("\n")
-
+                handle_repo_info(repo_name, repo_info, args.runtime)
             return self.url_pull(args, model_path, directory_path)
         except (urllib.error.HTTPError, urllib.error.URLError, KeyError) as e:
             if self.hf_cli_available:
