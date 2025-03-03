@@ -34,7 +34,8 @@ def fetch_checksum_from_api(url):
 
 
 def get_repo_info(repo_name):
-    # Docs on API call here: https://huggingface.co/docs/hub/en/api#get-apimodelsrepoid-or-apimodelsrepoidrevisionrevision
+    # Docs on API call here: 
+    # https://huggingface.co/docs/hub/en/api#get-apimodelsrepoid-or-apimodelsrepoidrevisionrevision
     repo_info_url = f"https://huggingface.co/api/models/{repo_name}"
     with urllib.request.urlopen(repo_info_url) as response:
         if response.getcode() == 200:
@@ -85,7 +86,10 @@ class Huggingface(Model):
                 if "safetensors" in repo_info:
                     if args.runtime == "llama.cpp":
                         print(
-                            "\nllama.cpp does not support running safetensor models, please use a/convert to the GGUF format using:\n- https://huggingface.co/spaces/ggml-org/gguf-my-repo \n"
+                            "\n \
+                            llama.cpp does not support running safetensor models, \
+                            please use a/convert to the GGUF format using:\n \
+                            - https://huggingface.co/spaces/ggml-org/gguf-my-repo \n"
                         )
                 if "gguf" in repo_info:
                     print(
