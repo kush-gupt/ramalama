@@ -1,6 +1,7 @@
 import os
 import pathlib
 import urllib.request
+import json
 
 from ramalama.common import available, download_file, exec_cmd, perror, run_cmd, verify_checksum
 from ramalama.model import Model
@@ -30,6 +31,18 @@ def fetch_checksum_from_api(url):
         if line.startswith("oid sha256:"):
             return line.split(":", 1)[1].strip()
     raise ValueError("SHA-256 checksum not found in the API response.")
+
+def get_repo_info(repo_name):
+        # Docs on API call here: https://huggingface.co/docs/hub/en/api#get-apimodelsrepoid-or-apimodelsrepoidrevisionrevision
+        repo_info_url = f"https://huggingface.co/api/models/{repo_name}"
+        with urllib.request.urlopen(repo_info_url) as response:
+            if response.getcode() == 200:
+                repo_info = response.read().decode('utf-8')
+                return json.loads(repo_info)
+            else:
+                perror("Huggingface repo information pull failed")
+                raise KeyError(f"Response error code from repo info pull: {response.getcode()}")
+        return None
 
 
 class Huggingface(Model):
@@ -64,6 +77,21 @@ class Huggingface(Model):
         os.makedirs(symlink_dir, exist_ok=True)
 
         try:
+            # Check if huggingface repo instead of file
+            if self.directory.count("/") == 0:
+                repo_name = self.directory + "/" + self.filename
+                repo_info = get_repo_info(repo_name)
+                if "safetensors" in repo_info:
+                    if args.runtime == "llama.cpp":
+                        print("\nllama.cpp does not support running safetensor models, please use a/convert to the GGUF format using:\n- https://huggingface.co/spaces/ggml-org/gguf-my-repo \n")
+                if "gguf" in repo_info:
+                    print("There are GGUF files to choose in this repo, run one of the following commands to choose one:")
+                    for sibling in repo_info["siblings"]:
+                        if sibling["rfilename"].endswith('.gguf'):
+                            file = sibling["rfilename"]
+                            print(f"- ramalama pull hf://{repo_name}/{file}")
+                    print("\n")
+
             return self.url_pull(args, model_path, directory_path)
         except (urllib.error.HTTPError, urllib.error.URLError, KeyError) as e:
             if self.hf_cli_available:
