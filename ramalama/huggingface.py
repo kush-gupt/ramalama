@@ -55,7 +55,7 @@ def handle_repo_info(repo_name, repo_info, runtime):
             "- https://huggingface.co/spaces/ggml-org/gguf-my-repo"
         )
     if "gguf" in repo_info:
-        print("There are GGUF files to choose from in this repo, run one of the following commands to choose one:\n")
+        print("There are GGUF files to choose from in this repo, run one of the following commands to choose one:")
     for sibling in repo_info["siblings"]:
         if sibling["rfilename"].endswith('.gguf'):
             file = sibling["rfilename"]
