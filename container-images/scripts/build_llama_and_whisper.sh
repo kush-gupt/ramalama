@@ -21,7 +21,7 @@ dnf_install() {
   local vulkan_rpms=("vulkan-headers" "vulkan-loader-devel" "vulkan-tools" \
                      "spirv-tools" "glslc" "glslang")
   if [[ "${containerfile}" = "ramalama" ]] || [[ "${containerfile}" =~ rocm* ]] || \
-    [[ "${containerfile}" = "vulkan" ]]; then # All the UBI-based ones
+    [[ "${containerfile}" = "vulkan" ]] || [[ "${containerfile}" = "convert" ]]; then # All the UBI-based ones
     if [ "${ID}" = "fedora" ]; then
       dnf install -y "${rpm_list[@]}"
     else
@@ -173,6 +173,10 @@ clone_and_build_llama_cpp() {
   git submodule update --init --recursive
   git reset --hard "$llama_cpp_sha"
   cmake_steps "${common_flags[@]}"
+  if [ "$containerfile" = "convert" ]; then
+    pip install gguf-py/
+    pip install -r requirements/requirements-convert_hf_to_gguf.txt
+  fi
   cd ..
   rm -rf llama.cpp
 }
