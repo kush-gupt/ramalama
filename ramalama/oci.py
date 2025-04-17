@@ -165,7 +165,7 @@ class OCI(Model):
         reference_dir = reference.replace(":", "/")
         return registry, reference, reference_dir
 
-    def _generate_containerfile(self, model, model_name, args):
+    def _generate_containerfile(self, model_file, model_name, args):
         # Generate the containerfile content
         is_car = args.type == "car"
         has_gguf = hasattr(args, 'gguf')
@@ -197,9 +197,9 @@ RUN rm -rf /{model_name}-f16.gguf /models/{model_name}
                     f"COPY --from=builder /models/{model_name}-{args.gguf}.gguf /models/{model_name}-{args.gguf}.gguf\n"
                 )
             else:
-                content += f"COPY {model} /models/{model_name}\n"
+                content += f"COPY {model_file} /models/{model_name}\n"
         elif not has_gguf:
-            content += f"COPY {model} /models/{model_name}\n"
+            content += f"COPY {model_file} /models/{model_name}\n"
 
         content += f"LABEL {ociimage_car if is_car else ociimage_raw}\n"
 
@@ -209,10 +209,15 @@ RUN rm -rf /{model_name}-f16.gguf /models/{model_name}
         print(f"Building {target}...")
         src = os.path.realpath(source)
         contextdir = os.path.dirname(src)
-        model = os.path.basename(src)
+        model_file = os.path.basename(src)
         model_name = os.path.basename(source)
 
-        content = self._generate_containerfile(model, model_name, args)
+        print(src)
+        print(source)
+        print(model_file)
+        print(model_name)
+
+        content = self._generate_containerfile(model_file, model_name, args)
 
         containerfile = tempfile.NamedTemporaryFile(prefix='RamaLama_Containerfile_', delete=False)
         # Open the file for writing.
