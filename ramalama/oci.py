@@ -168,7 +168,7 @@ class OCI(Model):
     def _generate_containerfile(self, model, model_name, args):
         # Generate the containerfile content
         is_car = args.type == "car"
-        has_gguf = args.gguf is not None
+        has_gguf = hasattr(args, 'gguf')
         content = ""
 
         if is_car:
