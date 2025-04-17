@@ -198,7 +198,7 @@ COPY --from=builder /models /models
 COPY {model} /models/{model_name}
 LABEL {ociimage_raw}
     """
-            
+
         model_car = f"""\
 FROM {args.carimage}
 """
