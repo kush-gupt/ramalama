@@ -582,7 +582,7 @@ def pull_cli(args):
 def convert_parser(subparsers):
     parser = subparsers.add_parser(
         "convert",
-        help="convert AI Model from local storage to OCI Image",
+        help="convert AI Model from local storage or safetensor to OCI Image",
         formatter_class=argparse.RawTextHelpFormatter,
     )
     parser.add_argument(
@@ -599,6 +599,15 @@ type of OCI Model Image to push.
 
 Model "car" includes base image with the model stored in a /models subdir.
 Model "raw" contains the model and a link file model.file to it stored at /.""",
+    )
+    parser.add_argument(
+        "--gguf",
+        # nargs='?',
+        # const="Q4_K_M",
+        # default="Q4_K_M",
+        choices=["Q2_K", "Q3_K_S", "Q3_K_M", "Q3_K_L", "Q4_0", "Q4_K_S", "Q4_K_M",
+                  "Q5_0", "Q5_K_S", "Q5_K_M", "Q6_K", "Q8_0"],
+        help="GGUF quantization format",
     )
     add_network_argument(parser)
     parser.add_argument("SOURCE")  # positional argument

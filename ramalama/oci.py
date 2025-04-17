@@ -171,15 +171,38 @@ class OCI(Model):
         contextdir = os.path.dirname(src)
         model = os.path.basename(src)
         model_name = os.path.basename(source)
+
+        print(f"src: {src}")
+        print(f"contextdir: {contextdir}")
+        print(f"model: {model}")
+        print(f"model_name: {model_name}")
+
         model_raw = f"""\
 FROM {args.image} as builder
+"""
+        if args.gguf is not None:
+            model_raw += f"""\
+RUN mkdir -p /models
+RUN convert_hf_to_gguf.py --outfile /models/{model_name}-f16.gguf /models/{model_name}
+RUN llama-quantize /{model_name}-f16.gguf /models/{model_name}-{args.gguf}.gguf {args.gguf} && ln -s /models/{model_name}-{args.gguf}.gguf model.file
+RUN rm /models/{model_name}-f16.gguf
+
+FROM scratch
+COPY --from=builder /models /models
+COPY {model} /models/{model_name}
+LABEL {ociimage_raw}
+            """
+        else:
+
+            model_raw += f"""\
 RUN mkdir -p /models; cd /models; ln -s {model_name} model.file
 
 FROM scratch
 COPY --from=builder /models /models
 COPY {model} /models/{model_name}
 LABEL {ociimage_raw}
-"""
+    """
+        print(model_raw)
         model_car = f"""\
 FROM {args.carimage}
 RUN mkdir -p /models; cd /models; ln -s {model_name} model.file
