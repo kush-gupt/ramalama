@@ -8,16 +8,14 @@ on:
     paths:
       - "**/container-images/**"
       - ".github/workflows/ci-images.yml"
-    paths-ignore:
-      - "**/container-images/rocm"
+      - "!**/container-images/rocm"
   push:
     branches:
       - main
     paths:
       - "**/container-images/**"
       - ".github/workflows/ci-images.yml"
-    paths-ignore:
-      - "**/container-images/rocm"
+      - "!**/container-images/rocm"
 
 jobs:
   build:
