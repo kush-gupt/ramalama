@@ -180,7 +180,8 @@ FROM {args.image} as builder
 RUN mkdir -p /models; cd /models; ln -s {model_name}-{args.gguf}.gguf model.file
 COPY {model_name} /models/{model_name}
 RUN convert_hf_to_gguf.py --outfile /{model_name}-f16.gguf /models/{model_name}
-RUN llama-quantize /{model_name}-f16.gguf /models/{model_name}-{args.gguf}.gguf {args.gguf} && ln -s /models/{model_name}-{args.gguf}.gguf model.file
+RUN llama-quantize /{model_name}-f16.gguf /models/{model_name}-{args.gguf}.gguf {args.gguf}
+RUN ln -s /models/{model_name}-{args.gguf}.gguf model.file
 RUN rm -rf /{model_name}-f16.gguf /models/{model_name}
 
 FROM scratch
@@ -207,7 +208,8 @@ FROM {args.carimage}
 RUN mkdir -p /models; cd /models; ln -s {model_name}-{args.gguf}.gguf model.file
 COPY {model_name} /models/{model_name}
 RUN convert_hf_to_gguf.py --outfile /{model_name}-f16.gguf /models/{model_name}
-RUN llama-quantize /{model_name}-f16.gguf /models/{model_name}-{args.gguf}.gguf {args.gguf} && ln -s /models/{model_name}-{args.gguf}.gguf model.file
+RUN llama-quantize /{model_name}-f16.gguf /models/{model_name}-{args.gguf}.gguf {args.gguf}
+RUN ln -s /models/{model_name}-{args.gguf}.gguf model.file
 RUN rm -rf /{model_name}-f16.gguf /models/{model_name}
             """
         else:
