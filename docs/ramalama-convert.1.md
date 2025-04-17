@@ -30,6 +30,10 @@ type of OCI Model Image to convert.
 | car  | Includes base image with the model stored in a /models subdir |
 | raw  | Only the model and a link file model.file to it stored at /   |
 
+#### **--gguf**=*Q2_K* | *Q3_K_S* | *Q3_K_M* | *Q3_K_L* | *Q4_0* | *Q4_K_S* | *Q4_K_M* | *Q5_0* | *Q5_K_S* | *Q5_K_M* | *Q6_K* | *Q8_0* 
+
+Convert Safetensor models into a GGUF with the specified quantization format. To learn more about model quantization, read [this llama.cpp documentation](https://github.com/ggml-org/llama.cpp/blob/master/examples/quantize/README.md)
+
 ## EXAMPLE
 
 Generate an oci model out of an Ollama model.
@@ -43,6 +47,15 @@ COMMIT quay.io/rhatdan/tiny:latest
 --> 69db4a10191c
 Successfully tagged quay.io/rhatdan/tiny:latest
 69db4a10191c976d2c3c24da972a2a909adec45135a69dbb9daeaaf2a3a36344
+```
+
+Generate and run an oci model with a quantized GGUF converted from Safetensors.
+```
+$ ramalama --image quay.io/ramalama/ramalama-rag convert --gguf Q4_K_M hf://ibm-granite/granite-3.2-2b-instruct oci://quay.io/kugupta/granite-3.2-q4-k-m:latest
+Converting /Users/kugupta/.local/share/ramalama/models/huggingface/ibm-granite/granite-3.2-2b-instruct to quay.io/kugupta/granite-3.2-q4-k-m:latest...
+Building quay.io/kugupta/granite-3.2-q4-k-m:latest...
+
+$ ramalama run oci://quay.io/kugupta/granite-3.2-q4-k-m:latest
 ```
 
 ## SEE ALSO
