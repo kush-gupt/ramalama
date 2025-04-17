@@ -212,11 +212,6 @@ RUN rm -rf /{model_name}-f16.gguf /models/{model_name}
         model_file = os.path.basename(src)
         model_name = os.path.basename(source)
 
-        print(src)
-        print(source)
-        print(model_file)
-        print(model_name)
-
         content = self._generate_containerfile(model_file, model_name, args)
 
         containerfile = tempfile.NamedTemporaryFile(prefix='RamaLama_Containerfile_', delete=False)
