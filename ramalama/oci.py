@@ -182,14 +182,15 @@ FROM {args.image} as builder
 """
         if args.gguf is not None:
             model_raw += f"""\
-RUN mkdir -p /models
-RUN convert_hf_to_gguf.py --outfile /models/{model_name}-f16.gguf /models/{model_name}
+RUN mkdir -p /models; cd /models; ln -s {model_name}-{args.gguf}.gguf model.file
+COPY {model_name} /models/{model_name}
+RUN convert_hf_to_gguf.py --outfile /{model_name}-f16.gguf /models/{model_name}
 RUN llama-quantize /{model_name}-f16.gguf /models/{model_name}-{args.gguf}.gguf {args.gguf} && ln -s /models/{model_name}-{args.gguf}.gguf model.file
-RUN rm /models/{model_name}-f16.gguf
+RUN rm -rf /{model_name}-f16.gguf /models/{model_name}
 
 FROM scratch
 COPY --from=builder /models /models
-COPY {model} /models/{model_name}
+COPY --from=builder /models/{model_name}-{args.gguf}.gguf /models/{model_name}-{args.gguf}.gguf
 LABEL {ociimage_raw}
             """
         else:
