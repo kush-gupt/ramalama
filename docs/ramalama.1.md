@@ -184,6 +184,7 @@ It adds support for model versioning and multiple files such as chat templates. 
 | [ramalama-info(1)](ramalama-info.1.md)            | display RamaLama configuration information                 |
 | [ramalama-inspect(1)](ramalama-inspect.1.md)      | inspect the specified AI Model                             |
 | [ramalama-list(1)](ramalama-list.1.md)            | list all downloaded AI Models                              |
+| [ramalama-lightspeed(1)](ramalama-lightspeed.1.md) | interact with RHEL Lightspeed API via a proxy      |
 | [ramalama-login(1)](ramalama-login.1.md)          | login to remote registry                                   |
 | [ramalama-logout(1)](ramalama-logout.1.md)        | logout from remote registry                                |
 | [ramalama-perplexity(1)](ramalama-perplexity.1.md)| calculate the perplexity value of an AI Model              |

@@ -1,0 +1,54 @@
+# RHEL Lightspeed Proxy Containerfile
+# This container runs Nginx as a reverse proxy to the RHEL Lightspeed API,
+# using client certificates for authentication.
+# It expects RHSM client certificates to be available at /etc/pki/consumer/
+# at runtime, typically provided by Podman mounts on a subscribed RHEL host.
+
+FROM registry.access.redhat.com/ubi9/ubi:latest
+
+ARG LIGHTSPEED_ENDPOINT_HOST_ARG=cert.console.redhat.com
+ARG LIGHTSPEED_ENDPOINT_PORT_ARG=443
+ARG PROXY_LISTEN_PORT_ARG=8888
+
+ENV LIGHTSPEED_ENDPOINT_HOST=${LIGHTSPEED_ENDPOINT_HOST_ARG}
+ENV LIGHTSPEED_ENDPOINT_PORT=${LIGHTSPEED_ENDPOINT_PORT_ARG}
+ENV PROXY_LISTEN_PORT=${PROXY_LISTEN_PORT_ARG}
+
+# Install Nginx and gettext (for envsubst)
+# Also create a non-root user for nginx if not present, or ensure nginx can run as user 1001.
+# UBI images typically have a default non-root user (often 1001).
+RUN dnf install -y nginx gettext && \
+    dnf clean all && \
+    # Create directories with appropriate permissions for Nginx to run as non-root (user 1001)
+    mkdir -p /var/log/nginx && \
+    chown -R 1001:0 /var/log/nginx && \
+    chmod -R ug+w /var/log/nginx && \
+    mkdir -p /var/run/nginx && \
+    chown -R 1001:0 /var/run/nginx && \
+    chmod -R ug+w /var/run/nginx && \
+    mkdir -p /etc/nginx/certs && \
+    chown -R 1001:0 /etc/nginx && \
+    chmod -R ug+w /etc/nginx && \
+    # Forward request and error logs to stdout/stderr for container logging
+    ln -sf /dev/stdout /var/log/nginx/access.log && \
+    ln -sf /dev/stderr /var/log/nginx/error.log
+
+# Copy Nginx configuration template
+COPY nginx.conf.rhel-lightspeed-proxy /etc/nginx/nginx.conf.template
+RUN chown 1001:0 /etc/nginx/nginx.conf.template && chmod 644 /etc/nginx/nginx.conf.template
+
+# Ensure the certificate directory exists with correct ownership for Nginx,
+# though certs themselves are expected from host mounts.
+RUN mkdir -p /etc/pki/consumer && \
+    chown 1001:0 /etc/pki/consumer && \
+    chmod 755 /etc/pki/consumer
+
+USER 1001
+
+EXPOSE ${PROXY_LISTEN_PORT}
+
+STOPSIGNAL SIGQUIT
+
+# Use envsubst to substitute environment variables in the nginx config at runtime.
+# Nginx will be started by the non-root user.
+CMD /bin/bash -c "envsubst '\$LIGHTSPEED_ENDPOINT_HOST \$LIGHTSPEED_ENDPOINT_PORT \$PROXY_LISTEN_PORT' < /etc/nginx/nginx.conf.template > /etc/nginx/nginx.conf && nginx -g 'daemon off;'"

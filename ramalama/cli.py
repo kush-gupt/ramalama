@@ -244,6 +244,7 @@ def configure_subcommands(parser):
     info_parser(subparsers)
     inspect_parser(subparsers)
     list_parser(subparsers)
+    lightspeed_parser(subparsers)
     login_parser(subparsers)
     logout_parser(subparsers)
     perplexity_parser(subparsers)
@@ -1104,6 +1105,55 @@ def client_cli(args):
     client_args = ["ramalama-client-core", "-c", "2048", "--temp", "0.8", args.HOST] + args.ARGS
     client_args[0] = get_cmd_with_wrapper(client_args[0])
     exec_cmd(client_args)
+
+
+def lightspeed_cli(args):
+    """Handle lightspeed command execution"""
+    proxy_host = f"http://localhost:{args.proxy_port}"
+
+    logger.debug(f"RHEL Lightspeed command called for query: '{' '.join(args.ARGS)}'")
+    logger.debug(f"Using proxy: {proxy_host}")
+
+    # Construct arguments for ramalama-client-core, similar to client_cli
+    # Default context size and temperature, can be overridden if further args are passed via ARGS
+    # For now, let's keep it simple and assume ARGS are only for the prompt.
+    # If ramalama-client-core supports overriding -c and --temp via ARGS, that will work.
+    client_core_args = ["-c", "2048", "--temp", "0.8"] # Default options for client-core
+
+    # Check if ARGS already contains options like -c or --temp.
+    # This is a simple check; a more robust parser might be needed if complex overrides are desired.
+    has_custom_options = any(arg.startswith('-') for arg in args.ARGS)
+
+    if has_custom_options:
+        # If ARGS contains options, assume user is providing all necessary ramalama-client-core options.
+        # The HOST (proxy_host) will be prepended.
+        client_args = ["ramalama-client-core", proxy_host] + args.ARGS
+    else:
+        # If ARGS are just the prompt, prepend default options and then the prompt.
+        client_args = ["ramalama-client-core"] + client_core_args + [proxy_host] + args.ARGS
+
+    client_args[0] = get_cmd_with_wrapper(client_args[0])
+
+    logger.debug(f"Executing ramalama-client-core with args: {client_args}")
+    exec_cmd(client_args)
+
+
+def lightspeed_parser(subparsers):
+    """Add parser for lightspeed command"""
+    parser = subparsers.add_parser("lightspeed", help="Interact with RHEL Lightspeed via a proxy")
+    parser.add_argument(
+        "--proxy-port",
+        default="8888", # Default RHEL Lightspeed proxy port
+        type=parse_port_option, # Validate port
+        help="Port where the RHEL Lightspeed proxy container is listening (default: 8888)"
+    )
+    parser.add_argument(
+        "ARGS",
+        nargs="*",
+        help="Prompt/query to send to RHEL Lightspeed, or full arguments for ramalama-client-core",
+        completer=suppressCompleter,
+    )
+    parser.set_defaults(func=lightspeed_cli)
 
 
 def perplexity_parser(subparsers):
