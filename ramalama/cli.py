@@ -6,6 +6,7 @@ import os
 import shlex
 import subprocess
 import sys
+import time
 import urllib
 from datetime import datetime, timezone
 from pathlib import Path
@@ -35,6 +36,9 @@ from ramalama.version import print_version, version
 
 shortnames = Shortnames()
 
+
+RHEL_LIGHTSPEED_PROXY_IMAGE = "rhel-lightspeed-proxy:latest"
+RHEL_LIGHTSPEED_PROXY_CONTAINER_NAME = "ramalama-rhel-lightspeed-proxy-active"
 
 GENERATE_OPTIONS = ["quadlet", "kube", "quadlet/kube"]
 
@@ -1107,35 +1111,153 @@ def client_cli(args):
     exec_cmd(client_args)
 
 
+def _is_proxy_container_running(container_name: str) -> bool:
+    try:
+        result = subprocess.run(
+            ["sudo", "podman", "ps", "-a", "--filter", f"name=^/{container_name}$", "--format", "{{.Status}}"],
+            capture_output=True, text=True, check=False
+        )
+        if result.returncode == 0 and result.stdout:
+            status = result.stdout.strip()
+            if status.startswith("Up"):
+                logger.debug(f"Proxy container '{container_name}' is running (status: {status}).")
+                return True
+            elif "Exited" in status:
+                logger.debug(f"Proxy container '{container_name}' exists but is exited. Attempting to remove.")
+                try:
+                    rm_result = subprocess.run(
+                        ["sudo", "podman", "rm", container_name],
+                        capture_output=True, text=True, check=True # check=True to raise error if rm fails
+                    )
+                    logger.debug(f"Successfully removed exited container '{container_name}'.")
+                except subprocess.CalledProcessError as e_rm:
+                    logger.warning(f"Failed to remove exited container '{container_name}': {e_rm.stderr.strip()}")
+                except FileNotFoundError: # Handle if sudo podman rm not found (less likely if ps worked)
+                     logger.error("`sudo podman rm` command not found.")
+                return False # Needs restart
+            else:
+                logger.debug(f"Proxy container '{container_name}' not found or in a non-running/non-exited state: {status}.")
+                return False
+        else:
+            logger.debug(f"Proxy container '{container_name}' not found (or podman ps error: {result.stderr.strip()}).")
+            return False
+    except FileNotFoundError:
+        logger.error("`sudo podman` command not found. Please ensure Podman is installed and sudo access is configured if needed.")
+        # Return True to prevent trying to start it, as Podman is not usable. User will get error from client_core.
+        # Or, more aggressively, raise an exception or print to perror. For now, let client_core fail.
+        # Revising: Better to indicate failure to manage proxy.
+        perror("`sudo podman` command not found. Cannot manage proxy container.")
+        raise RuntimeError("Podman not found, cannot manage proxy.") # Or sys.exit / return specific error code
+    except Exception as e:
+        logger.error(f"Error checking proxy container status for '{container_name}': {e}")
+        # Similar to FileNotFoundError, indicate failure.
+        perror(f"Error checking proxy container status: {e}")
+        raise RuntimeError(f"Error checking proxy: {e}") # Or sys.exit
+    return False # Default to false if any unhandled case
+
+
+def _start_proxy_container(container_name: str, host_port: str, image_name: str) -> bool:
+    logger.info(f"Attempting to start RHEL Lightspeed proxy container '{container_name}' from image '{image_name}' on host port {host_port}...")
+    podman_run_command = [
+        "sudo", "podman", "run", "-d", "--rm",
+        "--name", container_name,
+        "-p", f"{host_port}:8888", # Assumes internal container port is 8888
+        "--security-opt", "seccomp=unconfined",
+        image_name
+    ]
+    try:
+        logger.debug(f"Executing: {' '.join(podman_run_command)}")
+        # Use subprocess.PIPE for stdout/stderr to avoid them printing directly unless an error occurs
+        process = subprocess.Popen(podman_run_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        stdout, stderr = process.communicate(timeout=30) # Added timeout
+
+        if process.returncode == 0:
+            logger.info(f"Proxy container '{container_name}' started successfully. Container ID: {stdout.strip()}")
+            logger.info("Waiting a few seconds for Nginx to initialize...")
+            time.sleep(5)
+            return True
+        else:
+            stderr_output = stderr.strip()
+            logger.error(f"Failed to start proxy container '{container_name}'. Exit code: {process.returncode}")
+            logger.error(f"Podman stderr: {stderr_output}")
+            if "unable to find image" in stderr_output.lower() or "image not known" in stderr_output.lower() or "manifest unknown" in stderr_output.lower() :
+                perror(f"Error: Proxy image '{image_name}' not found. "
+                       "Please build it first using instructions in 'ramalama client --help' (RHEL Lightspeed section) or 'ramalama-lightspeed --help'.")
+            elif "port is already allocated" in stderr_output.lower() or "port has already been used" in stderr_output.lower():
+                perror(f"Error: Host port {host_port} is already in use. "
+                       "Try a different port using --proxy-port <new_port>, or stop the conflicting container.")
+            elif ("denied" in stderr_output.lower() or "permission" in stderr_output.lower()) and "sudo" in podman_run_command[0]:
+                 perror("Error: Permission denied running `sudo podman`. Ensure passwordless sudo access for Podman is configured for this user, or run ramalama with sudo if appropriate.")
+            else:
+                perror(f"Failed to start proxy container. Check Podman (and sudo) setup and image availability. Error: {stderr_output}")
+            return False
+    except FileNotFoundError:
+        perror("Error: `sudo podman` command not found. Please ensure Podman is installed and sudo access is configured if needed.")
+        return False
+    except subprocess.TimeoutExpired:
+        logger.error(f"Timeout trying to start proxy container '{container_name}'.")
+        perror(f"Timeout starting proxy container. Check `sudo podman logs {container_name}` if it was created.")
+        return False
+    except Exception as e:
+        perror(f"An unexpected error occurred while starting the proxy container '{container_name}': {e}")
+        return False
+
+
 def lightspeed_cli(args):
-    """Handle lightspeed command execution"""
-    proxy_host = f"http://localhost:{args.proxy_port}"
+    """Handle lightspeed command execution, managing the proxy container."""
+    proxy_host_port = args.proxy_port
+    # Use the global constants
+    proxy_container_name = RHEL_LIGHTSPEED_PROXY_CONTAINER_NAME
+    proxy_image_name = RHEL_LIGHTSPEED_PROXY_IMAGE
+
+    try:
+        if not _is_proxy_container_running(proxy_container_name):
+            if not _start_proxy_container(proxy_container_name, proxy_host_port, proxy_image_name):
+                # Error message already printed by _start_proxy_container
+                # Depending on how main() handles errors, might want to sys.exit(1) or raise specific exception
+                return 1 # Indicate failure
+    except RuntimeError as e: # Catch specific errors from helper functions
+        # perror already called by helpers for these specific RuntimeErrors
+        return 1 # Indicate failure
+
+
+    proxy_host_url = f"http://localhost:{proxy_host_port}"
 
     logger.debug(f"RHEL Lightspeed command called for query: '{' '.join(args.ARGS)}'")
-    logger.debug(f"Using proxy: {proxy_host}")
+    logger.debug(f"Using proxy: {proxy_host_url} (via container '{proxy_container_name}')")
 
-    # Construct arguments for ramalama-client-core, similar to client_cli
-    # Default context size and temperature, can be overridden if further args are passed via ARGS
-    # For now, let's keep it simple and assume ARGS are only for the prompt.
-    # If ramalama-client-core supports overriding -c and --temp via ARGS, that will work.
-    client_core_args = ["-c", "2048", "--temp", "0.8"] # Default options for client-core
-
-    # Check if ARGS already contains options like -c or --temp.
-    # This is a simple check; a more robust parser might be needed if complex overrides are desired.
+    client_core_args = ["-c", "2048", "--temp", "0.8"]
     has_custom_options = any(arg.startswith('-') for arg in args.ARGS)
 
     if has_custom_options:
-        # If ARGS contains options, assume user is providing all necessary ramalama-client-core options.
-        # The HOST (proxy_host) will be prepended.
-        client_args = ["ramalama-client-core", proxy_host] + args.ARGS
+        client_args_list = ["ramalama-client-core", proxy_host_url] + args.ARGS
     else:
-        # If ARGS are just the prompt, prepend default options and then the prompt.
-        client_args = ["ramalama-client-core"] + client_core_args + [proxy_host] + args.ARGS
+        client_args_list = ["ramalama-client-core"] + client_core_args + [proxy_host_url] + args.ARGS
 
-    client_args[0] = get_cmd_with_wrapper(client_args[0])
+    client_args_list[0] = get_cmd_with_wrapper(client_args_list[0])
 
-    logger.debug(f"Executing ramalama-client-core with args: {client_args}")
-    exec_cmd(client_args)
+    logger.debug(f"Executing ramalama-client-core with args: {client_args_list}")
+    try:
+        # exec_cmd is expected to handle CalledProcessError by printing and exiting.
+        # If not, or if more specific handling is needed here:
+        exec_cmd(client_args_list)
+        return 0 # Indicate success
+    except subprocess.CalledProcessError as e:
+        # This block might be redundant if exec_cmd already exits.
+        # If exec_cmd can raise, then handle it.
+        stderr_message = e.stderr.strip() if e.stderr else ""
+        if ("Connection refused" in stderr_message or
+            "Failed to connect" in stderr_message or
+            "Couldn't connect to server" in stderr_message): # curl like error from client-core
+            perror(f"Error: Could not connect to the proxy at {proxy_host_url}. "
+                   "The proxy container might have stopped or Nginx inside it may not be running correctly. "
+                   f"Check logs: sudo podman logs {proxy_container_name}")
+        else:
+            perror(f"Error executing ramalama-client-core (exit code {e.returncode}): {stderr_message}")
+        return e.returncode
+    except Exception as e:
+        perror(f"An unexpected error occurred when trying to run ramalama-client-core: {e}")
+        return 1 # General error
 
 
 def lightspeed_parser(subparsers):
@@ -1202,7 +1324,9 @@ def main():
         sys.exit(exit_code)
 
     try:
-        args.func(args)
+        exit_code = args.func(args)
+        if isinstance(exit_code, int) and exit_code != 0:
+            sys.exit(exit_code)
     except urllib.error.HTTPError as e:
         eprint(f"pulling {e.geturl()} failed: {e}", errno.EINVAL)
     except HelpException:
