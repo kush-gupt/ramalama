@@ -291,8 +291,12 @@ class Model(ModelBase):
 
     def setup_mounts(self, model_path, args):
         if args.runtime == "vllm":
-            if self.store and hasattr(self.store, 'get_ref_file') and hasattr(
-                    self, 'model_tag') and hasattr(self.store, 'model_base_directory'):
+            if (
+                self.store
+                and hasattr(self.store, 'get_ref_file')
+                and hasattr(self, 'model_tag')
+                and hasattr(self.store, 'model_base_directory')
+            ):
                 ref_file = self.store.get_ref_file(self.model_tag)
                 if ref_file and hasattr(ref_file, 'hash'):
                     model_base = self.store.model_base_directory
