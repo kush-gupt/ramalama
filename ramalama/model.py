@@ -299,11 +299,13 @@ class Model(ModelBase):
                     self.engine.add([f"--mount=type=bind,src={model_base},destination={MNT_DIR},ro"])
                 else:
                     # Might be needed for file:// paths directly used with vLLM.
-                    if model_path and os.path.exists(model_path) and os.path.isfile(model_path):
-                        model_base = os.path.dirname(model_path)
-                        self.engine.add([f"--mount=type=bind,src={model_base},destination={MNT_DIR},ro"])
-                    elif model_path and os.path.exists(model_path) and os.path.isdir(model_path):
-                        self.engine.add([f"--mount=type=bind,src={model_path},destination={MNT_DIR},ro"])
+                    if model_path and os.path.exists(model_path):
+                        if os.path.isfile(model_path):
+                            model_base = os.path.dirname(model_path)
+                            self.engine.add([f"--mount=type=bind,src={model_base},destination={MNT_DIR},ro"])
+                        elif os.path.isdir(model_path):
+                            self.engine.add([f"--mount=type=bind,src={model_path},destination={MNT_DIR},ro"])
+
         elif model_path and os.path.exists(model_path):
             if hasattr(self, 'split_model'):
                 self.engine.add([f"--mount=type=bind,src={model_path},destination={MNT_DIR}/{self.mnt_path},ro"])
