@@ -290,7 +290,21 @@ class Model(ModelBase):
         return True
 
     def setup_mounts(self, model_path, args):
-        if model_path and os.path.exists(model_path):
+        if args.runtime == "vllm":
+            if self.store and hasattr(self.store, 'get_ref_file') and hasattr(
+                    self, 'model_tag') and hasattr(self.store, 'model_base_directory'):
+                ref_file = self.store.get_ref_file(self.model_tag)
+                if ref_file and hasattr(ref_file, 'hash'):
+                    model_base = self.store.model_base_directory
+                    self.engine.add([f"--mount=type=bind,src={model_base},destination={MNT_DIR},ro"])
+                else:
+                    # Might be needed for file:// paths directly used with vLLM.
+                    if model_path and os.path.exists(model_path) and os.path.isfile(model_path):
+                        model_base = os.path.dirname(model_path)
+                        self.engine.add([f"--mount=type=bind,src={model_base},destination={MNT_DIR},ro"])
+                    elif model_path and os.path.exists(model_path) and os.path.isdir(model_path):
+                        self.engine.add([f"--mount=type=bind,src={model_path},destination={MNT_DIR},ro"])
+        elif model_path and os.path.exists(model_path):
             if hasattr(self, 'split_model'):
                 self.engine.add([f"--mount=type=bind,src={model_path},destination={MNT_DIR}/{self.mnt_path},ro"])
 
@@ -531,9 +545,22 @@ class Model(ModelBase):
     def handle_runtime(self, args, exec_args, exec_model_path):
         set_accel_env_vars()
         if args.runtime == "vllm":
-            exec_model_path = os.path.dirname(exec_model_path)
-            # Left out "vllm", "serve" the image entrypoint already starts it
-            exec_args = ["--port", args.port, "--model", MNT_FILE, "--max_model_len", "2048"]
+            snapshot_dir_name = self.store.get_ref_file(self.model_tag).hash
+            container_model_path = os.path.join(MNT_DIR, "snapshots/", snapshot_dir_name)
+
+            exec_args = [
+                "--port",
+                str(args.port),
+                "--model",
+                str(container_model_path),
+                "--max_model_len",
+                str(args.vllm_max_model_len),
+                "--served-model-name",
+                self.model_name,
+            ]
+
+            if hasattr(args, 'runtime_args') and args.runtime_args:
+                exec_args.extend(args.runtime_args)
         else:
             gpu_args = self.gpu_args(args=args)
             if gpu_args is not None:

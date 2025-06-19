@@ -866,6 +866,14 @@ def runtime_options(parser, command):
             help="arguments to add to runtime invocation",
             completer=suppressCompleter,
         )
+        parser.add_argument(
+            "--max-model-len",
+            dest="vllm_max_model_len",
+            type=int,
+            default=2048,
+            help="Maximum model length for vLLM",
+            completer=suppressCompleter,
+        )
     parser.add_argument("--seed", help="override random seed", completer=suppressCompleter)
     parser.add_argument(
         "--temp",
