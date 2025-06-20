@@ -307,8 +307,8 @@ class Model(ModelBase):
                 self.engine.add([f"--mount=type=bind,src={model_base},destination={MNT_DIR},ro"])
             else:
                 raise ValueError(
-                    f"Could not determine a valid host directory to mount for model '{self.model}'. \
-                          Ensure the model path is correct or the model store is properly configured."
+                    f'Could not determine a valid host directory to mount for model {self.model}'
+                    + 'Ensure the model path is correct or the model store is properly configured.'
                 )
 
         elif model_path and os.path.exists(model_path):
