@@ -861,7 +861,6 @@ def runtime_options(parser, command):
             "--max-model-len",
             dest="vllm_max_model_len",
             type=int,
-            default=2048,
             help="Maximum model length for vLLM",
             completer=suppressCompleter,
         )

@@ -567,13 +567,17 @@ class Model(ModelBase):
                 else:
                     container_model_path = os.path.join(MNT_DIR, os.path.basename(current_model_host_path))
 
+            vllm_max_model_len = 2048
+            if args.vllm_max_model_len:
+                vllm_max_model_len = args.vllm_max_model_len
+
             exec_args = [
                 "--port",
                 str(args.port),
                 "--model",
                 str(container_model_path),
                 "--max_model_len",
-                str(args.vllm_max_model_len),
+                str(vllm_max_model_len),
                 "--served-model-name",
                 self.model_name,
             ]
