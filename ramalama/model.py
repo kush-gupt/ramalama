@@ -291,24 +291,20 @@ class Model(ModelBase):
 
     def setup_mounts(self, model_path, args):
         if args.runtime == "vllm":
-            if (
-                self.store
-                and hasattr(self.store, 'get_ref_file')
-                and hasattr(self, 'model_tag')
-                and hasattr(self.store, 'model_base_directory')
-            ):
+            model_base = ""
+            if self.store and hasattr(self, 'model_tag'):
                 ref_file = self.store.get_ref_file(self.model_tag)
                 if ref_file and hasattr(ref_file, 'hash'):
                     model_base = self.store.model_base_directory
-                    self.engine.add([f"--mount=type=bind,src={model_base},destination={MNT_DIR},ro"])
-                else:
-                    # Might be needed for file:// paths directly used with vLLM.
-                    if model_path and os.path.exists(model_path):
-                        if os.path.isfile(model_path):
-                            model_base = os.path.dirname(model_path)
-                            self.engine.add([f"--mount=type=bind,src={model_base},destination={MNT_DIR},ro"])
-                        elif os.path.isdir(model_path):
-                            self.engine.add([f"--mount=type=bind,src={model_path},destination={MNT_DIR},ro"])
+            if not model_base:
+                # Might be needed for file:// paths directly used with vLLM.
+                if model_path and os.path.exists(model_path):
+                    if os.path.isfile(model_path):
+                        model_base = os.path.dirname(model_path)
+                    elif os.path.isdir(model_path):
+                        model_base = model_path
+            if model_base:
+                self.engine.add([f"--mount=type=bind,src={model_base},destination={MNT_DIR},ro"])
 
         elif model_path and os.path.exists(model_path):
             if hasattr(self, 'split_model'):
@@ -551,8 +547,20 @@ class Model(ModelBase):
     def handle_runtime(self, args, exec_args, exec_model_path):
         set_accel_env_vars()
         if args.runtime == "vllm":
-            snapshot_dir_name = self.store.get_ref_file(self.model_tag).hash
-            container_model_path = os.path.join(MNT_DIR, "snapshots/", snapshot_dir_name)
+            container_model_path = ""
+            ref_file = None
+            if self.store:
+                ref_file = self.store.get_ref_file(self.model_tag)
+
+            if ref_file and ref_file.hash:
+                snapshot_dir_name = ref_file.hash
+                container_model_path = os.path.join(MNT_DIR, "snapshots", snapshot_dir_name)
+            else:
+                current_model_host_path = self.get_model_path(args)
+                if os.path.isdir(current_model_host_path):
+                    container_model_path = MNT_DIR
+                else:
+                    container_model_path = os.path.join(MNT_DIR, os.path.basename(current_model_host_path))
 
             exec_args = [
                 "--port",
