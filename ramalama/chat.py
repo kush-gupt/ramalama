@@ -69,7 +69,11 @@ class RamaLamaShell(cmd.Cmd):
         self.request_in_process = False
         self.prompt = args.prefix
 
-        self.url = f"{args.url}/chat/completions"
+        # MLX server uses /v1/chat/completions endpoint
+        if getattr(args, "runtime", None) == "mlx":
+            self.url = f"{args.url}/v1/chat/completions"
+        else:
+            self.url = f"{args.url}/chat/completions"
         self.prep_rag_message()
 
     def prep_rag_message(self):

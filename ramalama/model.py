@@ -1,9 +1,13 @@
 import os
 import pathlib
+import platform
 import random
 import re
+import shlex
 import socket
+import subprocess
 import sys
+import threading
 import time
 
 import ramalama.chat as chat
@@ -114,7 +118,7 @@ class Model(ModelBase):
         self._model_type = type(self).__name__.lower()
 
         self._model_store_path: str = model_store_path
-        self._model_store: ModelStore = None
+        self._model_store: ModelStore | None = None
 
         self.default_image = accel_image(CONFIG)
 
@@ -347,6 +351,12 @@ class Model(ModelBase):
         # The Run command will first launch a daemonized service
         # and run chat to communicate with it.
         self.validate_args(args)
+
+        # MLX runtime uses direct generation
+        if getattr(args, "runtime", None) == "mlx":
+            self.mlx_run_chat(args)
+            return
+
         args.port = compute_serving_port(args, quiet=args.debug)
         if args.container:
             args.name = self.get_container_name(args)
@@ -380,6 +390,161 @@ class Model(ModelBase):
                 args.pid2kill = pid
                 chat.chat(args)
 
+    def mlx_run_chat(self, args):
+        """Launch the native `mlx_lm.chat` interactive session once and delegate I/O to it."""
+
+        model_path = self.get_model_path(args)
+
+        # If the user supplied a prompt on the command line we'll just fall back to
+        # one-shot generation handled via ``generate``.
+        if args.ARGS:
+            prompt = " ".join(args.ARGS)
+            if not sys.stdin.isatty():
+                prompt += "\n" + sys.stdin.read()
+            self._mlx_generate_response(model_path, prompt, args, return_response=False, stream_output=True)
+            return
+
+        # Otherwise start an interactive chat session.
+        exec_args = self._build_mlx_exec_args("chat", model_path, args)
+
+        if args.dryrun:
+            from ramalama.engine import dry_run
+
+            dry_run(exec_args)
+            return
+
+        exec_cmd(exec_args, stdout2null=False)
+
+    def _build_mlx_exec_args(self, subcommand: str, model_path: str, args, extra: list[str] | None = None) -> list[str]:
+        """Return the command-line *exec_args* for ``mlx_lm`` *subcommand*.
+
+        Parameters
+        ----------
+        subcommand:
+            One of ``"chat"``, ``"generate"`` or ``"server"``.
+        model_path:
+            Filesystem path (host or container-mapped).
+        args:
+            Parsed CLI *args* namespace.
+        extra:
+            Optional list of extra arguments to append verbatim.
+        """
+
+        allowed_subcommands = {"chat", "generate", "server"}
+        if subcommand not in allowed_subcommands:
+            raise ValueError(f"Invalid subcommand: {subcommand}")
+
+        exec_args = [
+            "python",
+            "-m",
+            "mlx_lm",
+            subcommand,
+            "--model",
+            shlex.quote(model_path),
+        ]
+
+        if getattr(args, "temp", None) is not None:
+            exec_args += ["--temp", str(args.temp)]
+
+        if getattr(args, "seed", None) is not None:
+            exec_args += ["--seed", str(args.seed)]
+
+        if getattr(args, "context", None):
+            exec_args += ["--max-tokens", str(args.context)]
+
+        exec_args += getattr(args, "runtime_args", [])
+
+        if extra:
+            exec_args += extra
+
+        return exec_args
+
+    def _mlx_generate_response(self, model_path, prompt, args, *, return_response=False, stream_output=True):
+        """Generate or chat with the model via the ``mlx_lm`` CLI.
+
+        Behaviour differences:
+        - *Interactive* mode (``return_response=True``)  ⇒ use ``mlx_lm.chat`` and capture the
+          full reply (needed so that we can append it to the conversation history).
+        - *Single-prompt* mode (``return_response=False``) ⇒ use ``mlx_lm.generate`` with exec_cmd
+          for direct execution.
+        """
+
+        extra = None if return_response else ["--prompt", prompt]
+        exec_args = self._build_mlx_exec_args("chat" if return_response else "generate", model_path, args, extra)
+
+        if args.dryrun:
+            from ramalama.engine import dry_run
+
+            dry_run(exec_args)
+            return None if return_response else None
+
+        # For single-prompt mode, use exec_cmd
+        if not return_response:
+            exec_cmd(exec_args, stdout2null=False)
+            return None
+
+        # For interactive mode, we need to capture the response
+        # Consume stderr concurrently to avoid deadlocks if its buffer fills.
+        def _drain_stderr(proc):
+            if proc.stderr is None:
+                return
+            while True:
+                chunk = proc.stderr.read(1024)
+                if chunk == "" and proc.poll() is not None:
+                    break
+                if chunk and "EOFError" not in chunk:
+                    sys.stderr.write(chunk)
+                    sys.stderr.flush()
+
+        try:
+            # Start chat subprocess – we will send the prompt via stdin.
+            process = subprocess.Popen(
+                exec_args,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                bufsize=1,  # use line-buffering in text mode
+            )
+
+            stderr_thread = threading.Thread(target=_drain_stderr, args=(process,), daemon=True)
+            stderr_thread.start()
+
+            if not process.stdin:
+                raise RuntimeError("Failed to create stdin pipe")
+
+            process.stdin.write(prompt + "\n")
+            process.stdin.flush()
+
+            collected_stdout = []
+            if process.stdout:
+                stdout_pipe = process.stdout
+                while True:
+                    char = stdout_pipe.read(1)
+                    if char == '' and process.poll() is not None:
+                        # EOF reached
+                        break
+                    if char:
+                        sys.stdout.write(char)
+                        sys.stdout.flush()
+                        collected_stdout.append(char)
+
+            # Ensure the process has completed execution.
+            # Use wait() because stdout/stderr are drained concurrently.
+            process.wait()
+            stderr_thread.join(timeout=1)
+
+            # Raise an exception if the subprocess exited with an error so that the
+            # ``except subprocess.CalledProcessError`` block below is reachable.
+            if process.returncode != 0:
+                raise subprocess.CalledProcessError(process.returncode, exec_args)
+
+            return "".join(collected_stdout).strip()
+
+        except subprocess.CalledProcessError as e:
+            print(f"Error running MLX: {e}", file=sys.stderr)
+            return None
+
     def perplexity(self, args):
         self.validate_args(args)
         model_path = self.get_model_path(args)
@@ -388,13 +553,16 @@ class Model(ModelBase):
 
     def build_exec_args_perplexity(self, args, model_path):
         exec_model_path = MNT_FILE if args.container else model_path
-        exec_args = ["llama-perplexity"]
 
+        if getattr(args, "runtime", None) == "mlx":
+            raise NotImplementedError("Perplexity calculation is not supported by the MLX runtime.")
+
+        # Default llama.cpp perplexity calculation
+        exec_args = ["llama-perplexity"]
         set_accel_env_vars()
         gpu_args = self.gpu_args(args=args)
         if gpu_args is not None:
             exec_args.extend(gpu_args)
-
         exec_args += ["-m", exec_model_path]
 
         return exec_args
@@ -445,18 +613,27 @@ class Model(ModelBase):
 
     def build_exec_args_bench(self, args, model_path):
         exec_model_path = MNT_FILE if args.container else model_path
-        exec_args = ["llama-bench"]
 
-        set_accel_env_vars()
-        gpu_args = self.gpu_args(args=args)
-        if gpu_args is not None:
-            exec_args.extend(gpu_args)
-
-        exec_args += ["-m", exec_model_path]
+        if getattr(args, "runtime", None) == "mlx":
+            raise NotImplementedError("Perplexity calculation is not supported by the MLX runtime.")
+        else:
+            # Default llama.cpp benchmarking
+            exec_args = ["llama-bench"]
+            set_accel_env_vars()
+            gpu_args = self.gpu_args(args=args)
+            if gpu_args is not None:
+                exec_args.extend(gpu_args)
+            exec_args += ["-m", exec_model_path]
 
         return exec_args
 
     def validate_args(self, args):
+        # MLX validation
+        if getattr(args, "runtime", None) == "mlx":
+            is_apple_silicon = platform.system() == "Darwin" and platform.machine() == "arm64"
+            if not is_apple_silicon:
+                raise ValueError("MLX runtime is only supported on macOS with Apple Silicon.")
+
         # If --container was specified return valid
         if args.container:
             return
@@ -536,9 +713,15 @@ class Model(ModelBase):
             exec_args.extend(["--flash-attn"])
         return exec_args
 
+    def mlx_serve(self, args, exec_model_path):
+        extra = ["--port", str(args.port), "--host", args.host]
+        return self._build_mlx_exec_args("server", exec_model_path, args, extra)
+
     def build_exec_args_serve(self, args, exec_model_path, chat_template_path="", mmproj_path=""):
         if args.runtime == "vllm":
             exec_args = self.vllm_serve(args, exec_model_path)
+        elif args.runtime == "mlx":
+            exec_args = self.mlx_serve(args, exec_model_path)
         else:
             exec_args = self.llama_serve(args, exec_model_path, chat_template_path, mmproj_path)
 
@@ -582,6 +765,9 @@ class Model(ModelBase):
 
             if getattr(args, 'runtime_args', None):
                 exec_args.extend(args.runtime_args)
+        elif args.runtime == "mlx":
+            # MLX uses the exec_args from mlx_serve
+            pass
         else:
             gpu_args = self.gpu_args(args=args)
             if gpu_args is not None:

@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
-from ramalama.model import compute_serving_port
+from ramalama.model import Model, compute_serving_port
 from ramalama.model_factory import ModelFactory
 
 
@@ -129,3 +129,76 @@ def test_compute_serving_port(
             else:
                 outputPort = compute_serving_port(args, False)
                 assert outputPort == expectedOutput
+
+
+class TestMLXRuntime:
+    """Test MLX runtime functionality"""
+
+    def test_mlx_serve_args(self):
+        """Test that MLX serve generates correct arguments"""
+        args = Namespace(port="8080", host="127.0.0.1", context=2048, temp="0.8", runtime_args=["--verbose"])
+
+        model = Model("test-model", "/tmp/store")
+        exec_args = model.mlx_serve(args, "/path/to/model")
+
+        expected_args = [
+            "python",
+            "-m",
+            "mlx_lm",
+            "server",
+            "--model",
+            "/path/to/model",
+            "--temp",
+            "0.8",
+            "--max-tokens",
+            "2048",
+            "--verbose",
+            "--port",
+            "8080",
+            "--host",
+            "127.0.0.1",
+        ]
+
+        assert exec_args == expected_args
+
+    @patch('ramalama.model.platform.system')
+    @patch('ramalama.model.platform.machine')
+    def test_mlx_validation_container_no_error(self, mock_machine, mock_system):
+        """Test that MLX runtime validation passes when mocking macOS with Apple Silicon"""
+        mock_system.return_value = "Darwin"
+        mock_machine.return_value = "arm64"
+
+        args = Namespace(runtime="mlx", container=True)
+
+        model = Model("test-model", "/tmp/store")
+
+        # Should not raise an error since we're mocking macOS with Apple Silicon
+        model.validate_args(args)
+
+    @patch('ramalama.model.platform.system')
+    @patch('ramalama.model.platform.machine')
+    def test_mlx_validation_non_macos_error(self, mock_machine, mock_system):
+        """Test that MLX runtime fails on non-macOS systems"""
+        mock_system.return_value = "Linux"
+        mock_machine.return_value = "x86_64"
+
+        args = Namespace(runtime="mlx", container=False, privileged=False)
+
+        model = Model("test-model", "/tmp/store")
+
+        with pytest.raises(ValueError, match="MLX runtime is only supported on macOS"):
+            model.validate_args(args)
+
+    @patch('ramalama.model.platform.system')
+    @patch('ramalama.model.platform.machine')
+    def test_mlx_validation_success(self, mock_machine, mock_system):
+        """Test that MLX runtime passes validation on macOS with --nocontainer"""
+        mock_system.return_value = "Darwin"
+        mock_machine.return_value = "arm64"
+
+        args = Namespace(runtime="mlx", container=False, privileged=False)
+
+        model = Model("test-model", "/tmp/store")
+
+        # Should not raise any exception
+        model.validate_args(args)
