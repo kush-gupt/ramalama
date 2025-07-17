@@ -6,7 +6,7 @@ from typing import Dict, List
 import ramalama.oci
 from ramalama.arg_types import EngineArgs
 from ramalama.model_store.constants import DIRECTORY_NAME_BLOBS, DIRECTORY_NAME_REFS, DIRECTORY_NAME_SNAPSHOTS
-from ramalama.model_store.reffile import RefFile
+from ramalama.model_store.reffile import RefFile, RefJSONFile
 
 
 @dataclass
@@ -35,7 +35,18 @@ class GlobalModelStore:
             if DIRECTORY_NAME_REFS in subdirs:
                 ref_dir = os.path.join(root, DIRECTORY_NAME_REFS)
                 for ref_file_name in os.listdir(ref_dir):
-                    ref_file: RefFile = RefFile.from_path(os.path.join(ref_dir, ref_file_name))
+                    ref_file_path = os.path.join(ref_dir, ref_file_name)
+                    
+                    # Handle both text format and JSON format ref files
+                    if ref_file_name.endswith('.json'):
+                        ref_file = RefJSONFile.from_path(ref_file_path)
+                        filenames = [f.name for f in ref_file.files]
+                        ref_hash = ref_file.hash
+                    else:
+                        ref_file = RefFile.from_path(ref_file_path)
+                        filenames = ref_file.filenames
+                        ref_hash = ref_file.hash
+                    
                     model_path = root.replace(self.path, "").replace(os.sep, "", 1)
 
                     parts = model_path.split("/")
@@ -47,12 +58,12 @@ class GlobalModelStore:
                     model_name = f"{model_source}{separator}{model_path_without_source}:{tag}"
 
                     collected_files = []
-                    for snapshot_file in ref_file.filenames:
+                    for snapshot_file in filenames:
                         is_partially_downloaded = False
-                        snapshot_file_path = os.path.join(root, DIRECTORY_NAME_SNAPSHOTS, ref_file.hash, snapshot_file)
+                        snapshot_file_path = os.path.join(root, DIRECTORY_NAME_SNAPSHOTS, ref_hash, snapshot_file)
                         if not os.path.exists(snapshot_file_path):
                             blobs_partial_file_path = os.path.join(
-                                root, DIRECTORY_NAME_BLOBS, ref_file.hash + ".partial"
+                                root, DIRECTORY_NAME_BLOBS, ref_hash + ".partial"
                             )
                             if not os.path.exists(blobs_partial_file_path):
                                 continue
@@ -88,4 +99,4 @@ class GlobalModelStore:
     #    2. for blobs not reached by ref->snapshot chain -> delete
     #    3. for empty folders -> delete
     def cleanup(self):
-        pass
+        pass 

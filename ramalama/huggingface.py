@@ -2,6 +2,7 @@ import json
 import os
 import pathlib
 import urllib.request
+import urllib.error
 
 from ramalama.common import available, perror, run_cmd
 from ramalama.hf_style_repo_base import (
@@ -11,7 +12,7 @@ from ramalama.hf_style_repo_base import (
     fetch_checksum_from_api_base,
 )
 from ramalama.logger import logger
-from ramalama.model_store.snapshot_file import SnapshotFileType
+from ramalama.model_store.snapshot_file import SnapshotFile, SnapshotFileType
 
 missing_huggingface = """
 Optional: Huggingface models require the huggingface-cli module.
@@ -37,13 +38,17 @@ def huggingface_token():
             pass
 
 
-def extract_huggingface_checksum(data):
-    """Extract SHA-256 checksum from Hugging Face API response."""
-    # Extract the SHA-256 checksum from the `oid sha256` line
-    for line in data.splitlines():
-        if line.startswith("oid sha256:"):
-            return line.split(":", 1)[1].strip()
-    raise ValueError("SHA-256 checksum not found in the API response.")
+def extract_huggingface_checksum(file_url):
+    """Extract the SHA-256 checksum for the file at the URL."""
+    import hashlib
+
+    try:
+        with urllib.request.urlopen(file_url) as response:
+            file_content = response.read()
+            # File is binary so calculating sha256 hash
+            return hashlib.sha256(file_content).hexdigest()
+    except Exception:
+        return ""
 
 
 def fetch_checksum_from_api(organization, file):
@@ -78,28 +83,140 @@ def fetch_repo_manifest(repo_name: str, tag: str = "latest"):
         return json.loads(repo_manifest)
 
 
-class HuggingfaceCLIFile(HFStyleRepoFile):
-    pass
+def get_repo_info(repo_name):
+    # Docs on API call:
+    # https://huggingface.co/docs/hub/en/api#get-apimodelsrepoid-or-apimodelsrepoidrevisionrevision
+    repo_info_url = f"https://huggingface.co/api/models/{repo_name}"
+    headers = {}
+    token = huggingface_token()
+    if token is not None:
+        headers['Authorization'] = f"Bearer {token}"
+    
+    logger.debug(f"Fetching repo info from {repo_info_url}")
+    request = urllib.request.Request(repo_info_url, headers=headers)
+    with urllib.request.urlopen(request) as response:
+        if response.getcode() == 200:
+            repo_info = response.read().decode('utf-8')
+            return json.loads(repo_info)
+        else:
+            perror("Huggingface repo information pull failed")
+            raise KeyError(f"Response error code from repo info pull: {response.getcode()}")
+    return None
 
 
 class HuggingfaceRepository(HFStyleRepository):
     REGISTRY_URL = "https://huggingface.co"
 
+    def __init__(self, name: str, organization: str, tag: str = 'latest'):
+        self.use_full_repo = False
+        self.files_info = []
+        super().__init__(name, organization, tag)
+
     def fetch_metadata(self):
-        # Repo org/name. Fetch repo manifest to determine model/mmproj file
+        # Repo org/name. Detect model type by checking repository files first
         self.blob_url = f"{HuggingfaceRepository.REGISTRY_URL}/{self.organization}/{self.name}/resolve/main"
-        self.manifest = fetch_repo_manifest(f"{self.organization}/{self.name}", self.tag)
-        try:
-            self.model_filename = self.manifest['ggufFile']['rfilename']
-            self.model_hash = self.manifest['ggufFile']['blobId']
-        except KeyError:
-            perror("Repository manifest missing ggufFile data")
-            raise
-        self.mmproj_filename = self.manifest.get('mmprojFile', {}).get('rfilename', None)
-        self.mmproj_hash = self.manifest.get('mmprojFile', {}).get('blobId', None)
         token = huggingface_token()
         if token is not None:
             self.headers['Authorization'] = f"Bearer {token}"
+        
+        # First, get repository info to detect model type
+        repo_info = get_repo_info(f"{self.organization}/{self.name}")
+        
+        if 'siblings' not in repo_info:
+            # Fallback if no file list available
+            self.use_full_repo = True
+            self.model_filename = "model.safetensors"
+            self.model_hash = f"sha256:unknown"
+            self.mmproj_filename = None
+            self.mmproj_hash = None
+            return
+            
+        self.files_info = repo_info['siblings']
+        
+        # Check what types of model files exist
+        gguf_files = [f for f in self.files_info if f['rfilename'].endswith('.gguf')]
+        safetensor_files = [f for f in self.files_info if f['rfilename'].endswith(('.safetensors', '.safetensor'))]
+        
+        if gguf_files:
+            # GGUF repository - use manifest approach
+            logger.debug(f"Detected GGUF repository for {self.organization}/{self.name}")
+            self.use_full_repo = False
+            
+            try:
+                self.manifest = fetch_repo_manifest(f"{self.organization}/{self.name}", self.tag)
+                self.model_filename = self.manifest['ggufFile']['rfilename']
+                self.model_hash = self.manifest['ggufFile']['blobId']
+                self.mmproj_filename = self.manifest.get('mmprojFile', {}).get('rfilename', None)
+                self.mmproj_hash = self.manifest.get('mmprojFile', {}).get('blobId', None)
+            except (KeyError, urllib.error.HTTPError):
+                # Fallback to using first GGUF file if manifest fails
+                main_gguf = gguf_files[0]
+                self.model_filename = main_gguf['rfilename']
+                self.model_hash = main_gguf.get('oid', f"sha256:{main_gguf['rfilename']}")
+                self.mmproj_filename = None
+                self.mmproj_hash = None
+                
+        elif safetensor_files:
+            # SafeTensor repository - use full repository API
+            logger.debug(f"Detected SafeTensor repository for {self.organization}/{self.name}")
+            self.use_full_repo = True
+            
+            # Use the first SafeTensor file as the "main" model file
+            main_model = safetensor_files[0]
+            self.model_filename = main_model['rfilename']
+            
+            # Use the repository's sha as a stable hash for the snapshot
+            self.model_hash = f"sha256:{repo_info.get('sha', 'unknown')}"
+            self.mmproj_filename = None
+            self.mmproj_hash = None
+            
+        else:
+            # No recognized model files - fallback to full repo approach
+            logger.debug(f"No recognized model files found for {self.organization}/{self.name}, using full repository API")
+            self.use_full_repo = True
+            self.model_filename = "model.safetensors"
+            self.model_hash = f"sha256:{repo_info.get('sha', 'unknown')}"
+            self.mmproj_filename = None
+            self.mmproj_hash = None
+
+    def get_file_list(self, cached_files: list[str]) -> list[SnapshotFile]:
+        if self.use_full_repo:
+            # Return all relevant files for the model using full repository approach
+            files = []
+            
+            for file_info in self.files_info:
+                filename = file_info['rfilename']
+                
+                if filename in cached_files:
+                    continue
+                    
+                # Determine file type
+                file_type = SnapshotFileType.Other
+                if filename.endswith(('.safetensors', '.safetensor')):
+                    file_type = SnapshotFileType.Model
+                elif filename.endswith('.gguf'):
+                    file_type = SnapshotFileType.Model
+                elif 'mmproj' in filename.lower():
+                    file_type = SnapshotFileType.Mmproj
+                    
+                # Create file hash - use the file's oid if available, otherwise generate from filename
+                file_hash = file_info.get('oid', f"sha256:{filename}")
+                
+                files.append(SnapshotFile(
+                    url=f"{self.blob_url}/{filename}",
+                    header=self.headers,
+                    hash=file_hash,
+                    type=file_type,
+                    name=filename,
+                    should_show_progress=file_type == SnapshotFileType.Model,
+                    should_verify_checksum=False,  # Skip checksum verification for now
+                    required=file_type == SnapshotFileType.Model,
+                ))
+            
+            return files
+        else:
+            # Use the standard GGUF approach
+            return super().get_file_list(cached_files)
 
 
 class HuggingfaceRepositoryModel(HuggingfaceRepository):
@@ -113,29 +230,14 @@ class HuggingfaceRepositoryModel(HuggingfaceRepository):
             self.headers['Authorization'] = f"Bearer {token}"
 
 
-def get_repo_info(repo_name):
-    # Docs on API call:
-    # https://huggingface.co/docs/hub/en/api#get-apimodelsrepoid-or-apimodelsrepoidrevisionrevision
-    repo_info_url = f"https://huggingface.co/api/models/{repo_name}"
-    logger.debug(f"Fetching repo info from {repo_info_url}")
-    with urllib.request.urlopen(repo_info_url) as response:
-        if response.getcode() == 200:
-            repo_info = response.read().decode('utf-8')
-            return json.loads(repo_info)
-        else:
-            perror("Huggingface repo information pull failed")
-            raise KeyError(f"Response error code from repo info pull: {response.getcode()}")
-    return None
 
 
-def handle_repo_info(repo_name, repo_info, runtime):
-    if "safetensors" in repo_info and runtime == "llama.cpp":
-        perror(
-            "\nllama.cpp does not support running safetensor models, "
-            "please use a/convert to the GGUF format using:\n"
-            f"- https://huggingface.co/models?other=base_model:quantized:{repo_name} \n"
-            "- https://huggingface.co/spaces/ggml-org/gguf-my-repo"
-        )
+
+class HuggingfaceCLIFile(HFStyleRepoFile):
+    def __init__(
+        self, url, header, hash, name, type, should_show_progress=False, should_verify_checksum=False, required=True
+    ):
+        super().__init__(url, header, hash, name, type, should_show_progress, should_verify_checksum, required)
 
 
 class Huggingface(HFStyleRepoModel):
@@ -181,6 +283,14 @@ class Huggingface(HFStyleRepoModel):
             # if it is a repo then normalize the case insensitive quantization tag
             if model_tag != "latest":
                 model_tag = model_tag.upper()
+        else:
+            # Handle (org/repo/file.gguf)
+            org_parts = model_organization.split('/')
+            if len(org_parts) >= 2:
+                if len(org_parts) > 2 or model_name.endswith(('.gguf', '.safetensors', '.safetensor')):
+                    actual_organization = org_parts[0]
+                    actual_name = org_parts[1] if len(org_parts) >= 2 else model_name
+                    return actual_name, model_tag, actual_organization
         return model_name, model_tag, model_organization
 
     def _fetch_snapshot_path(self, cache_dir, namespace, repo):
@@ -197,7 +307,7 @@ class Huggingface(HFStyleRepoModel):
         if not self.hf_cli_available:
             return False
 
-        default_hf_caches = [os.path.join(os.environ['HOME'], '.cache/huggingface/hub')]
+        default_hf_caches = [os.path.join(os.path.expanduser('~'), '.cache/huggingface/hub')]
         namespace, repo = os.path.split(str(self.directory))
 
         for cache_dir in default_hf_caches:
