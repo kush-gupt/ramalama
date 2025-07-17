@@ -2,12 +2,15 @@ import os
 import shutil
 import urllib.error
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from http import HTTPStatus
 from pathlib import Path
+from threading import Lock
 from typing import Optional, Tuple
 
 import ramalama.model_store.go2jinja as go2jinja
-from ramalama.common import generate_sha256, perror, verify_checksum
+from ramalama.common import generate_sha256, perror, verify_checksum, ProgressBar
+from ramalama.config import CONFIG
 from ramalama.endian import EndianMismatchError, get_system_endianness
 from ramalama.logger import logger
 from ramalama.model_inspect.gguf_parser import GGUFInfoParser, GGUFModelInfo
@@ -65,6 +68,9 @@ def map_ref_file(ref_file: RefFile, snapshot_directory: str) -> RefJSONFile:
         ref.files.append(StoreFile(determine_blob_hash(file), file, ftype))
 
     return ref
+
+
+# ProgressTracker functionality moved to common.ProgressBar
 
 
 class ModelStore:
@@ -223,7 +229,207 @@ class ModelStore:
         snapshot_directory = self.get_snapshot_directory(snapshot_hash)
         os.makedirs(snapshot_directory, exist_ok=True)
 
+    def _download_single_file(self, file: SnapshotFile, snapshot_hash: str, progress_bar: ProgressBar | None = None, file_trackers: dict | None = None) -> tuple[SnapshotFile, str, Exception | None]:
+        """Download a single snapshot file. Returns (file, blob_relative_path, exception)."""
+        dest_path = self.get_blob_file_path(file.hash)
+        blob_relative_path = ""
+        exception = None
+        
+        try:
+            if progress_bar is not None and file_trackers is not None:
+                # Use progress-aware download
+                blob_relative_path = self._download_with_progress(file, dest_path, self.get_snapshot_directory(snapshot_hash), progress_bar, file_trackers)
+            else:
+                # Use original download method
+                blob_relative_path = file.download(dest_path, self.get_snapshot_directory(snapshot_hash))
+                
+        except urllib.error.HTTPError as ex:
+            exception = ex
+            return file, blob_relative_path, exception
+        except Exception as ex:
+            exception = ex
+            return file, blob_relative_path, exception
+
+        if file.should_verify_checksum:
+            if not verify_checksum(dest_path):
+                logger.info(f"Checksum mismatch for blob {dest_path}, retrying download ...")
+                os.remove(dest_path)
+                try:
+                    if progress_bar is not None and file_trackers is not None:
+                        blob_relative_path = self._download_with_progress(file, dest_path, self.get_snapshot_directory(snapshot_hash), progress_bar, file_trackers)
+                    else:
+                        blob_relative_path = file.download(dest_path, self.get_snapshot_directory(snapshot_hash))
+                        
+                    if not verify_checksum(dest_path):
+                        exception = ValueError(f"Checksum verification failed for blob {dest_path}")
+                except Exception as ex:
+                    exception = ex
+            
+        return file, blob_relative_path, exception
+
+    def _download_with_progress(self, file: SnapshotFile, dest_path: str, snapshot_dir: str, progress_bar: ProgressBar, file_trackers: dict) -> str:
+        """Download file with progress reporting to the tracker."""
+        import urllib.request
+        import time
+        
+        # Check if file already exists (cached)
+        if os.path.exists(dest_path):
+            logger.debug(f"Using cached blob for {file.name} ({os.path.basename(dest_path)})")
+            file_size = os.path.getsize(dest_path)
+            with progress_bar.lock:
+                file_trackers[file.hash] = {'total': file_size, 'downloaded': file_size}
+                completed_count = len([f for f in file_trackers.values() if f['downloaded'] >= f['total']])
+                active_count = len([f for f in file_trackers.values() if f['downloaded'] < f['total']])
+                total_downloaded = sum(f['downloaded'] for f in file_trackers.values())
+                progress_bar.update(completed=completed_count, active=active_count, downloaded_bytes=total_downloaded)
+            return os.path.relpath(dest_path, start=snapshot_dir)
+        
+        # Prepare for download
+        dest_path_partial = dest_path + ".partial"
+        file_size = 0
+        
+        # Check for resume point
+        if os.path.exists(dest_path_partial):
+            file_size = os.path.getsize(dest_path_partial)
+        
+        # Make HTTP request to get content length
+        headers = dict(file.header) if file.header else {}
+        headers["Range"] = f"bytes={file_size}-"
+        
+        request = urllib.request.Request(file.url, headers=headers)
+        response = urllib.request.urlopen(request)
+        
+        if response.status not in (200, 206):
+            raise IOError(f"Request failed: {response.status}")
+        
+        total_size = int(response.getheader('content-length', 0)) + file_size
+        
+        # Initialize tracking for this file
+        with progress_bar.lock:
+            file_trackers[file.hash] = {'total': total_size, 'downloaded': file_size}
+            total_bytes = sum(f['total'] for f in file_trackers.values())
+            total_downloaded = sum(f['downloaded'] for f in file_trackers.values())
+            active_count = len([f for f in file_trackers.values() if f['downloaded'] < f['total']])
+            completed_count = len([f for f in file_trackers.values() if f['downloaded'] >= f['total']])
+            progress_bar.set_total_bytes(total_bytes)
+            progress_bar.update(completed=completed_count, active=active_count, downloaded_bytes=total_downloaded)
+        
+        # Download with progress tracking
+        downloaded = file_size
+        chunk_size = 8192
+        last_update = time.time()
+        
+        with open(dest_path_partial, "ab") as f:
+            while True:
+                chunk = response.read(chunk_size)
+                if not chunk:
+                    break
+                
+                f.write(chunk)
+                downloaded += len(chunk)
+                
+                # Update progress (throttled)
+                now = time.time()
+                if now - last_update >= 0.1:  # Update every 100ms
+                    with progress_bar.lock:
+                        file_trackers[file.hash]['downloaded'] = downloaded
+                        total_downloaded = sum(f['downloaded'] for f in file_trackers.values())
+                        progress_bar.update(downloaded_bytes=total_downloaded)
+                    last_update = now
+        
+        # Final progress update
+        with progress_bar.lock:
+            file_trackers[file.hash]['downloaded'] = downloaded
+            completed_count = len([f for f in file_trackers.values() if f['downloaded'] >= f['total']])
+            active_count = len([f for f in file_trackers.values() if f['downloaded'] < f['total']])
+            total_downloaded = sum(f['downloaded'] for f in file_trackers.values())
+            progress_bar.update(completed=completed_count, active=active_count, downloaded_bytes=total_downloaded)
+        
+        # Move to final destination
+        os.rename(dest_path_partial, dest_path)
+        
+        return os.path.relpath(dest_path, start=snapshot_dir)
+
     def _download_snapshot_files(self, model_tag: str, snapshot_hash: str, snapshot_files: list[SnapshotFile]):
+        ref_file = self.get_ref_file(model_tag)
+        max_workers = min(CONFIG.download_workers, len(snapshot_files))
+        
+        # For single file or config says 1 worker, use sequential download
+        if max_workers <= 1:
+            self._download_snapshot_files_sequential(model_tag, snapshot_hash, snapshot_files)
+            return
+
+        # Parallel download with coordinated progress
+        model_files = [f for f in snapshot_files if f.type == SnapshotFileType.Model]
+        has_model_files = len(model_files) > 0
+        
+        # Only show progress for model files or when no model files exist
+        should_show_progress = not has_model_files or any(True for _ in model_files)
+        
+        progress_bar = ProgressBar(total_items=len(snapshot_files), show_bytes=True) if should_show_progress else None
+        file_trackers = {}  # Track download progress per file
+        successful_downloads = []
+        failed_files = []
+        
+        try:
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                # Submit all download tasks
+                future_to_file = {
+                    executor.submit(self._download_single_file, file, snapshot_hash, progress_bar, file_trackers): file 
+                    for file in snapshot_files
+                }
+                
+                # Process completed downloads with proper Ctrl-C handling
+                try:
+                    for future in as_completed(future_to_file):
+                        file, blob_relative_path, exception = future.result()
+                        
+                        if exception:
+                            if isinstance(exception, urllib.error.HTTPError):
+                                if file.required:
+                                    raise exception
+                                # remove file from ref file list to prevent a retry to download it
+                                if exception.code == HTTPStatus.NOT_FOUND:
+                                    ref_file.remove_file(file.hash)
+                                failed_files.append((file, exception))
+                                continue
+                            else:
+                                # For other exceptions, re-raise if file is required
+                                if file.required:
+                                    raise exception
+                                failed_files.append((file, exception))
+                                continue
+                        
+                        # Create symlink for successful download
+                        link_path = self.get_snapshot_file_path(snapshot_hash, file.name)
+                        try:
+                            os.symlink(blob_relative_path, link_path)
+                        except FileExistsError:
+                            os.unlink(link_path)
+                            os.symlink(blob_relative_path, link_path)
+                        
+                        successful_downloads.append(file)
+                except KeyboardInterrupt:
+                    # Cancel all pending futures on Ctrl-C
+                    for future in future_to_file:
+                        future.cancel()
+                    if progress_bar:
+                        progress_bar.finish()
+                    raise
+        finally:
+            # Always clean up the progress display
+            if progress_bar:
+                progress_bar.finish()
+
+        # Log any failed optional files
+        for file, exception in failed_files:
+            logger.debug(f"Optional file {file.name} failed to download: {exception}")
+
+        # save updated ref file
+        ref_file.write_to_file()
+
+    def _download_snapshot_files_sequential(self, model_tag: str, snapshot_hash: str, snapshot_files: list[SnapshotFile]):
+        """Original sequential download logic as fallback."""
         ref_file = self.get_ref_file(model_tag)
 
         for file in snapshot_files:

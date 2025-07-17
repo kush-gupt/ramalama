@@ -591,6 +591,14 @@ def pull_parser(subparsers):
     parser = subparsers.add_parser("pull", help="pull AI Model from Model registry to local storage")
     parser.add_argument("--authfile", help="path of the authentication file")
     parser.add_argument(
+        "--download-workers",
+        dest="download_workers",
+        type=int,
+        default=CONFIG.download_workers,
+        help="number of parallel download threads",
+        completer=suppressCompleter,
+    )
+    parser.add_argument(
         "--tls-verify",
         dest="tlsverify",
         default=True,
@@ -601,6 +609,10 @@ def pull_parser(subparsers):
 
 
 def pull_cli(args):
+    # Override CONFIG.download_workers if specified via CLI
+    if hasattr(args, 'download_workers'):
+        CONFIG.download_workers = args.download_workers
+    
     model = New(args.MODEL, args)
     model.pull(args)
 

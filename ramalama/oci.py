@@ -34,16 +34,20 @@ def list_manifests(args: EngineArgType):
         "--filter",
         "manifest=true",
         "--format",
-        (
-            '{"name":"oci://{{ .Repository }}:{{ .Tag }}","modified":"{{ .CreatedAt }}",        "size":{{ .VirtualSize'
-            ' }}, "ID":"{{ .ID }}"},'
-        ),
+        '{"name":"oci://{{ .Repository }}:{{ .Tag }}","modified":"{{ .CreatedAt }}", "ID":"{{ .ID }}"},',
     ]
     output = run_cmd(conman_args).stdout.decode("utf-8").strip()
     if output == "":
         return []
 
     manifests = json.loads("[" + output[:-1] + "]")
+    
+    # Get accurate size from inspect for manifests
+    for manifest in manifests:
+        conman_args = [args.engine, "image", "inspect", manifest["ID"], "--format", "{{.Size}}"]
+        output = run_cmd(conman_args).stdout.decode("utf-8").strip()
+        manifest["size"] = int(output)
+    
     if not engine_supports_manifest_attributes(args.engine):
         return manifests
 
@@ -83,13 +87,9 @@ def list_models(args: EngineArgType):
     if conman is None:
         return []
 
-    # if engine is docker, size will be retrieved from the inspect command later
-    # if engine is podman use "size":{{ .VirtualSize }}
-    formatLine = '{"name":"oci://{{ .Repository }}:{{ .Tag }}","modified":"{{ .CreatedAt }}"'
-    if conman == "podman":
-        formatLine += ',"size":{{ .VirtualSize }}},'
-    else:
-        formatLine += ',"id":"{{ .ID }}"},'
+    # Use image inspect for accurate size information
+    # podman images VirtualSize returns manifest size, not actual model size
+    formatLine = '{"name":"oci://{{ .Repository }}:{{ .Tag }}","modified":"{{ .CreatedAt }}","id":"{{ .ID }}"},'
 
     conman_args = [
         conman,
@@ -107,16 +107,12 @@ def list_models(args: EngineArgType):
     # exclude dangling images having no tag (i.e. <none>:<none>)
     models = [model for model in models if model["name"] != "oci://<none>:<none>"]
 
-    # Grab the size from the inspect command
-    if conman == "docker":
-        # grab the size from the inspect command
-        for model in models:
-            conman_args = [conman, "image", "inspect", model["id"], "--format", "{{.Size}}"]
-            output = run_cmd(conman_args).stdout.decode("utf-8").strip()
-            # convert the number value from the string output
-            model["size"] = int(output)
-            # drop the id from the model
-            del model["id"]
+    # Get size from inspect for both Docker and Podman
+    for model in models:
+        conman_args = [conman, "image", "inspect", model["id"], "--format", "{{.Size}}"]
+        output = run_cmd(conman_args).stdout.decode("utf-8").strip()
+        model["size"] = int(output)
+        del model["id"]
 
     models += list_manifests(args)
     for model in models:

@@ -176,7 +176,7 @@ class Model(ModelBase):
             self._model_store = ModelStore(GlobalModelStore(self._model_store_path), name, self.model_type, orga)
         return self._model_store
 
-    def _get_entry_model_path(self, use_container: bool, should_generate: bool, dry_run: bool) -> str:
+    def _get_entry_model_path(self, use_container: bool, should_generate: bool, dry_run: bool, runtime: Optional[str] = None) -> str:
         """
         Returns the path to the model blob on the host if use_container and should_generate are both False.
         Or returns the path to the mounted file inside a container.
@@ -185,22 +185,46 @@ class Model(ModelBase):
             return "/path/to/model"
 
         ref_file = self.model_store.get_ref_file(self.model_tag)
-        if ref_file is None or not ref_file.model_files:
+        if ref_file is None:
             raise NoRefFileFound(self.model)
 
-        # Use the first model file
-        if is_split_file_model(self.model_name):
-            # Find model file with index 1 for split models
-            index_models = [file for file in ref_file.model_files if "-00001-of-" in file.name]
-            if len(index_models) != 1:
-                raise Exception(f"Found multiple index 1 gguf models: {index_models}")
-            model_file = index_models[0]
-        else:
-            model_file = ref_file.model_files[0]
+        model_files = ref_file.model_files
+        safetensor_files = [file for file in ref_file.files if file.name.endswith(('.safetensors', '.safetensor'))]
+        
+        if not model_files and not safetensor_files:
+            raise NoRefFileFound(self.model)
 
-        if use_container or should_generate:
-            return os.path.join(MNT_DIR, model_file.name)
-        return self.model_store.get_blob_file_path(model_file.hash)
+        # MLX and vLLM runtimes expect a directory containing model files when using SafeTensor models
+        if safetensor_files and runtime in ["mlx", "vllm"]:
+            # For MLX/vLLM models with SafeTensor files, return the snapshot directory
+            if use_container or should_generate:
+                return MNT_DIR
+            return self.model_store.get_snapshot_directory_from_tag(self.model_tag)
+
+        # For GGUF models or other runtimes with SafeTensor, return individual file path
+        if model_files:
+            # Use the first model file
+            if is_split_file_model(self.model_name):
+                # Find model file with index 1 for split models
+                index_models = [file for file in model_files if "-00001-of-" in file.name]
+                if len(index_models) != 1:
+                    raise Exception(f"Found multiple index 1 models: {index_models}")
+                model_file = index_models[0]
+            else:
+                model_file = model_files[0]
+
+            if use_container or should_generate:
+                return os.path.join(MNT_DIR, model_file.name)
+            return self.model_store.get_blob_file_path(model_file.hash)
+        
+        # Fallback for SafeTensor files with unsupported runtime
+        if safetensor_files:
+            safetensor_file = safetensor_files[0]
+            if use_container or should_generate:
+                return os.path.join(MNT_DIR, safetensor_file.name)
+            return self.model_store.get_blob_file_path(safetensor_file.hash)
+            
+        raise NoRefFileFound(self.model)
 
     def _get_mmproj_path(self, use_container: bool, should_generate: bool, dry_run: bool) -> Optional[str]:
         """
@@ -469,7 +493,7 @@ class Model(ModelBase):
         exec_args = [
             "mlx_lm.server",
             "--model",
-            shlex.quote(self._get_entry_model_path(args.container, args.generate, args.dryrun)),
+            shlex.quote(self._get_entry_model_path(args.container, args.generate, args.dryrun, "mlx")),
         ]
 
         if getattr(args, "temp", None):
@@ -564,7 +588,7 @@ class Model(ModelBase):
     def vllm_serve(self, args):
         exec_args = [
             "--model",
-            self._get_entry_model_path(args.container, args.generate, args.dryrun),
+            self._get_entry_model_path(args.container, args.generate, args.dryrun, "vllm"),
             "--port",
             args.port,
             "--max-sequence-length",

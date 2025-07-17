@@ -95,6 +95,7 @@ class BaseConfig:
     temp: str = "0.8"
     transport: str = "ollama"
     ocr: bool = False
+    download_workers: int = 3
     default_image: str = DEFAULT_IMAGE
     user: UserConfig = field(default_factory=UserConfig)
     selinux: bool = False
@@ -188,7 +189,7 @@ def load_env_config(env: Mapping[str, str] | None = None) -> dict[str, Any]:
         if key in config:
             config[key] = coerce_to_bool(config[key])
 
-    for key in ['threads', 'ctx_size', 'ngl']:
+    for key in ['threads', 'ctx_size', 'ngl', 'download_workers']:
         if key in config:
             config[key] = int(config[key])
     return config

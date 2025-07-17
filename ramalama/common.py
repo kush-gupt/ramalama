@@ -13,7 +13,9 @@ import shutil
 import string
 import subprocess
 import sys
+import time
 from functools import lru_cache
+from threading import Lock
 from typing import TYPE_CHECKING, Callable, List, Literal, Protocol, cast, get_args
 
 import ramalama.amdkfd as amdkfd
@@ -99,6 +101,92 @@ def apple_vm(engine: SUPPORTED_ENGINES, config: Config | None = None) -> bool:
 
 def perror(*args, **kwargs):
     print(*args, file=sys.stderr, **kwargs)
+
+
+class ProgressBar:
+    """Thread-safe progress bar for any operation in RamaLama."""
+
+    def __init__(self, total_items: int = 0, show_bytes: bool = False, throttle_interval: float = 0.5):
+        self.lock = Lock()
+        self.total_items = total_items
+        self.show_bytes = show_bytes
+        self.throttle_interval = throttle_interval
+        self.start_time = time.time()
+        self.last_update_time = 0
+
+        # Counters
+        self.completed_count = 0
+        self.active_count = 0
+
+        # Byte tracking (if show_bytes=True)
+        self.total_bytes = 0
+        self.downloaded_bytes = 0
+
+    def set_total_bytes(self, total_bytes: int):
+        """Set the total bytes for byte-based progress tracking."""
+        with self.lock:
+            self.total_bytes = total_bytes
+
+    def update(self, completed: int | None = None, active: int | None = None, downloaded_bytes: int | None = None):
+        """Update progress counters."""
+        with self.lock:
+            if completed is not None:
+                self.completed_count = completed
+            if active is not None:
+                self.active_count = active
+            if downloaded_bytes is not None:
+                self.downloaded_bytes = downloaded_bytes
+
+            # Throttle updates to prevent terminal flooding
+            now = time.time()
+            if now - self.last_update_time >= self.throttle_interval:
+                self._display()
+                self.last_update_time = now
+
+    def force_update(self):
+        """Force an immediate display update (bypasses throttling)."""
+        with self.lock:
+            self._display()
+
+    def _display(self):
+        """Internal method to display the progress bar."""
+        if self.show_bytes and self.total_bytes > 0:
+            # Byte-based progress
+            percentage = min(100, (self.downloaded_bytes * 100) // self.total_bytes)
+            size_info = f"{self._human_readable_size(self.downloaded_bytes)}/{self._human_readable_size(self.total_bytes)}"
+        else:
+            # Count-based progress
+            percentage = (self.completed_count * 100) // self.total_items if self.total_items > 0 else 100
+            size_info = f"{self.completed_count}/{self.total_items} files"
+
+        # Create progress bar
+        active_info = f"({self.active_count} active) " if self.active_count > 1 else ""
+        bar_width = 20
+        filled = int((percentage * bar_width) / 100)
+        bar = "█" * filled + "░" * (bar_width - filled)
+
+        # Build the complete line (fixed width to prevent artifacts)
+        progress_line = f"{percentage:3}% [{bar}] {size_info} {active_info}"
+        progress_line = progress_line[:78].ljust(78)  # Pad or truncate to 78 chars
+
+        # Write with carriage return only (no newline)
+        sys.stderr.write(f"\r{progress_line}")
+        sys.stderr.flush()
+
+    def _human_readable_size(self, size):
+        """Convert bytes to human readable format."""
+        for unit in ["B", "KB", "MB", "GB", "TB"]:
+            if size < 1024:
+                return f"{size:.1f} {unit}"
+            size /= 1024
+        return f"{size:.1f} PB"
+
+    def finish(self):
+        """Clear the progress line and move cursor to beginning of new line."""
+        with self.lock:
+            sys.stderr.write("\r\033[K")  # Clear the entire line
+            sys.stderr.write("\n")       # Move to new line
+            sys.stderr.flush()
 
 
 def available(cmd: str) -> bool:
