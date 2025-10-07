@@ -603,32 +603,35 @@ class Transport(TransportBase):
             if args.dryrun:
                 dry_run(exec_args)
                 return
-            
+
             # Special handling for MLX runtime to show progress bars
             if getattr(args, "runtime", None) == "mlx":
                 process = subprocess.Popen(exec_args, stderr=subprocess.PIPE, text=True, bufsize=1)
                 progress_re = re.compile(r'Prompt processing progress: (\d+)/(\d+)')
-                last_cur = -1  # Track last progress to avoid redundant updates
-                term_width = get_terminal_width()  # Cache terminal width
-                
-                if process.stderr:
-                    for line in iter(process.stderr.readline, ''):
-                        match = progress_re.search(line)
-                        if match:
-                            cur, tot = int(match.group(1)), int(match.group(2))
-                            if cur != last_cur:  # Only update if progress changed
-                                last_cur = cur
-                                pct = (100 * cur) // tot
-                                bar_width = max(1, term_width - 16)  # Approximate fixed overhead
-                                filled = (pct * bar_width) // 100
-                                perror(f'\r{pct:>3}% |{"█" * filled}{" " * (bar_width - filled)}| {cur}/{tot}', end='', flush=True)
-                                if cur == tot:
-                                    perror('\r\033[K', end='', flush=True)  # Clear the line
-                        elif not args.noout:
-                            perror(line, end='')
-                
-                if process.wait() != 0:
-                    raise subprocess.CalledProcessError(process.returncode, exec_args)
+                last_cur, term_width, stderr_lines = -1, get_terminal_width(), []
+
+                assert process.stderr  # stderr=PIPE ensures non-None
+                for line in iter(process.stderr.readline, ''):
+                    stderr_lines.append(line)
+                    match = progress_re.search(line)
+                    if match:
+                        cur, tot = int(match.group(1)), int(match.group(2))
+                        if cur != last_cur:
+                            last_cur = cur
+                            pct, bar_width = (100 * cur) // tot, max(1, term_width - 16)
+                            filled = (pct * bar_width) // 100
+                            perror(
+                                f'\r{pct:>3}% |{"█" * filled}{" " * (bar_width - filled)}| {cur}/{tot}',
+                                end='',
+                                flush=True,
+                            )
+                            if cur == tot:
+                                perror('\r\033[K', end='', flush=True)
+                    elif not args.noout:
+                        perror(line, end='')
+
+                if process.wait():
+                    raise subprocess.CalledProcessError(process.returncode, exec_args, output=''.join(stderr_lines))
             else:
                 exec_cmd(exec_args, stdout2null=args.noout, stderr2null=args.noout)
         except FileNotFoundError as e:
