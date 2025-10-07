@@ -21,13 +21,12 @@ from ramalama.common import (
     populate_volume_from_image,
     set_accel_env_vars,
 )
-from ramalama.model_inspect.base_info import get_terminal_width
 from ramalama.compose import Compose
 from ramalama.config import CONFIG, DEFAULT_PORT, DEFAULT_PORT_RANGE
 from ramalama.engine import Engine, dry_run, is_healthy, wait_for_healthy
 from ramalama.kube import Kube
 from ramalama.logger import logger
-from ramalama.model_inspect.base_info import ModelInfoBase
+from ramalama.model_inspect.base_info import ModelInfoBase, get_terminal_width
 from ramalama.model_inspect.gguf_info import GGUFModelInfo
 from ramalama.model_inspect.gguf_parser import GGUFInfoParser
 from ramalama.model_inspect.safetensor_info import SafetensorModelInfo
