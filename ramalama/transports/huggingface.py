@@ -1,6 +1,5 @@
 import json
 import os
-import pathlib
 import urllib.request
 
 from ramalama.common import available, perror, run_cmd
@@ -30,7 +29,6 @@ sudo dnf install python3-huggingface-hub
 def is_hf_cli_available():
     """Check if huggingface-cli is available on the system."""
     return available("hf")
-
 
 
 def extract_huggingface_checksum(data):
@@ -92,9 +90,9 @@ class HuggingfaceRepository(HFStyleRepository):
         except KeyError:
             # Fallback to safetensors
             if 'safetensors' in self.manifest:
-                 self.model_filename = self.manifest['safetensors']['rfilename']
-                 self.model_hash = self.manifest['safetensors']['blobId']
-                 self.model_type = SnapshotFileType.SafetensorModel
+                self.model_filename = self.manifest['safetensors']['rfilename']
+                self.model_hash = self.manifest['safetensors']['blobId']
+                self.model_type = SnapshotFileType.SafetensorModel
             else:
                 perror("Repository manifest missing ggufFile or safetensors data")
                 raise
@@ -114,9 +112,9 @@ class HuggingfaceRepositoryModel(HuggingfaceRepository):
         if self.name.endswith(".gguf"):
             self.model_type = SnapshotFileType.GGUFModel
         elif self.name.endswith(".safetensors"):
-             self.model_type = SnapshotFileType.SafetensorModel
+            self.model_type = SnapshotFileType.SafetensorModel
         else:
-             self.model_type = SnapshotFileType.Other
+            self.model_type = SnapshotFileType.Other
 
         token = huggingface_token()
         if token is not None:

@@ -278,7 +278,7 @@ class HFStyleRepoModel(Transport, ABC):
             repo = self.create_repository(name, organization, tag)
             snapshot_hash = repo.model_hash
             files = repo.get_file_list(cached_files)
-            
+
             # Check external caches for files before downloading
             for file in files:
                 blob_path = self.model_store.get_blob_file_path(file.hash)
@@ -293,7 +293,7 @@ class HFStyleRepoModel(Transport, ABC):
             raise
         except Exception as e:
             if isinstance(e, urllib.error.HTTPError) and e.code == 404:
-                 raise KeyError(f"Model not found: {str(e)}")
+                raise KeyError(f"Model not found: {str(e)}")
 
             if not available(self.get_cli_command()):
                 perror(f"URL pull failed and {self.get_cli_command()} not available")

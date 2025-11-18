@@ -6,10 +6,9 @@ from typing import Dict, List
 from ramalama import oci_tools
 from ramalama.arg_types import EngineArgs
 from ramalama.model_store.constants import DIRECTORY_NAME_BLOBS, DIRECTORY_NAME_REFS, DIRECTORY_NAME_SNAPSHOTS
+from ramalama.model_store.hf_cache import list_hf_cache_models
 from ramalama.model_store.reffile import RefJSONFile, migrate_reffile_to_refjsonfile
 
-
-from ramalama.model_store.hf_cache import list_hf_cache_models
 
 @dataclass
 class ModelFile:
@@ -90,13 +89,11 @@ class GlobalModelStore:
         for name, files in hf_models.items():
             # Differentiate native models vs hf cache by suffix
             # Also check if native model exists (with :latest/main tag usually)
-            # We don't want to hide HF cache models just because a native one exists, 
+            # We don't want to hide HF cache models just because a native one exists,
             # as they might be different versions/files.
             display_name = f"{name} (hf-cache)"
-            
-            models[display_name] = [
-                ModelFile(f.name, f.modified, f.size, f.is_partial) for f in files
-            ]
+
+            models[display_name] = [ModelFile(f.name, f.modified, f.size, f.is_partial) for f in files]
 
         return models
 

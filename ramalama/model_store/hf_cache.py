@@ -48,10 +48,10 @@ def get_hf_cache_dirs() -> List[str]:
 def _get_snapshot_path(cache_dir: str, namespace: str, repo: str) -> Optional[str]:
     cache_path = os.path.join(cache_dir, f'models--{namespace}--{repo}')
     ref_path = os.path.join(cache_path, 'refs', 'main')
-    
+
     if not os.path.exists(ref_path):
         return None
-        
+
     try:
         with open(ref_path, 'r') as f:
             snapshot = f.read().strip()
@@ -72,14 +72,14 @@ def find_file_in_cache(directory: str, filename: str, sha256_checksum: str) -> O
 
         file_path = os.path.join(snapshot_path, filename)
         blob_path = pathlib.Path(file_path).resolve()
-        
+
         if not blob_path.exists():
             continue
 
         # Verify it points to the correct blob in the cache
         if blob_path.name == expected_hash:
             return str(blob_path)
-            
+
     return None
 
 
@@ -108,10 +108,10 @@ def list_hf_cache_models() -> dict[str, List[CachedModelFile]]:
             parts = entry.split("--")
             if len(parts) < 3:
                 continue
-            
+
             namespace, repo = parts[1], "--".join(parts[2:])
             snapshot_path = _get_snapshot_path(cache_dir, namespace, repo)
-            
+
             if not snapshot_path:
                 continue
 
@@ -124,9 +124,9 @@ def list_hf_cache_models() -> dict[str, List[CachedModelFile]]:
                             model_files.append(CachedModelFile(file, stat.st_mtime, stat.st_size))
                         except OSError:
                             pass
-            
+
             if model_files:
                 key = f"hf://{namespace}/{repo}"
                 models.setdefault(key, []).extend(model_files)
-                    
+
     return models
