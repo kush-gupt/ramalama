@@ -93,7 +93,7 @@ class CachedModelFile:
 
 def list_hf_cache_models() -> dict[str, List[CachedModelFile]]:
     """List models present in the HuggingFace cache directories"""
-    models = {}
+    models: dict[str, List[CachedModelFile]] = {}
 
     for cache_dir in get_hf_cache_dirs():
         if not os.path.exists(cache_dir):
