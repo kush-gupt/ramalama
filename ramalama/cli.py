@@ -715,12 +715,19 @@ def convert_parser(subparsers):
     parser.add_argument(
         "--type",
         default="raw",
-        choices=["car", "raw"],
+        choices=["car", "raw", "squashfs"],
         help="""\
-type of OCI Model Image to push.
+type of output format for the converted model.
 
 Model "car" includes base image with the model stored in a /models subdir.
-Model "raw" contains the model and a link file model.file to it stored at /.""",
+Model "raw" contains the model and a link file model.file to it stored at /.
+Model "squashfs" creates a compressed squashfs image file.""",
+    )
+    parser.add_argument(
+        "--compression",
+        default="zstd",
+        choices=["gzip", "lz4", "zstd", "xz"],
+        help="squashfs compression algorithm (default: zstd)",
     )
     parser.add_argument("SOURCE")  # positional argument
     parser.add_argument("TARGET")  # positional argument
@@ -731,12 +738,18 @@ def convert_cli(args):
     if not args.container:
         raise ValueError("convert command cannot be run with the --nocontainer option.")
 
+    source_model = _get_source_model(args)
+
+    if args.type == "squashfs":
+        from ramalama.squashfs import create_squashfs
+
+        create_squashfs(source_model, args.TARGET, args)
+        return
+
     target = args.TARGET
     tgt = shortnames.resolve(target)
 
     model = TransportFactory(tgt, args).create_oci()
-
-    source_model = _get_source_model(args)
     model.convert(source_model, args)
 
 
