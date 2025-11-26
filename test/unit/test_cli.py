@@ -240,11 +240,14 @@ def test_post_parse_setup_model_input(
 class TestConvertArgs:
     """Tests for convert command arguments."""
 
-    @pytest.mark.parametrize("type_val,comp,exp_type,exp_comp", [
-        (None, None, "raw", "zstd"),  # defaults
-        ("squashfs", "lz4", "squashfs", "lz4"),
-        ("car", "gzip", "car", "gzip"),
-    ])
+    @pytest.mark.parametrize(
+        "type_val,comp,exp_type,exp_comp",
+        [
+            (None, None, "raw", "zstd"),  # defaults
+            ("squashfs", "lz4", "squashfs", "lz4"),
+            ("car", "gzip", "car", "gzip"),
+        ],
+    )
     def test_convert_type_and_compression(self, monkeypatch, type_val, comp, exp_type, exp_comp):
         from ramalama.cli import init_cli
 

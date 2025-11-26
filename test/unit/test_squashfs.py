@@ -8,7 +8,9 @@ import pytest
 
 
 class MockArgs:
-    def __init__(self, container=True, compression="zstd", image="test:latest", engine="podman", pull="newer", dryrun=False):
+    def __init__(
+        self, container=True, compression="zstd", image="test:latest", engine="podman", pull="newer", dryrun=False
+    ):
         self.container = container
         self.compression = compression
         self.image = image
@@ -93,7 +95,11 @@ class TestCreateSquashfs:
             store.ref_file = MockRefFile()
 
             with patch("ramalama.squashfs.dry_run") as mock:
-                create_squashfs(MockSourceModel(store), os.path.join(tmpdir, "out.squashfs"), MockArgs(dryrun=True, compression=compression))
+                create_squashfs(
+                    MockSourceModel(store),
+                    os.path.join(tmpdir, "out.squashfs"),
+                    MockArgs(dryrun=True, compression=compression),
+                )
                 args = mock.call_args[0][0]
                 assert args[args.index("-comp") + 1] == compression
 
@@ -107,10 +113,18 @@ class TestCreateSquashfs:
             store.ref_file = MockRefFile()
 
             with patch("ramalama.squashfs.dry_run") as mock:
-                create_squashfs(MockSourceModel(store), os.path.join(tmpdir, "out.squashfs"), MockArgs(dryrun=True, image="custom:img"))
+                create_squashfs(
+                    MockSourceModel(store),
+                    os.path.join(tmpdir, "out.squashfs"),
+                    MockArgs(dryrun=True, image="custom:img"),
+                )
                 args = mock.call_args[0][0]
                 assert any(f"{blobs_dir}:/blobs:ro" in a for a in args)
                 assert "SOURCE_DATE_EPOCH=0" in args
                 assert "custom:img" in args
                 for flag in ["-no-xattrs", "-noappend", "-no-exports", "-no-progress"]:
                     assert flag in args
+                # Verify mksquashfs only has /input as source
+                mksquashfs_idx = args.index("mksquashfs")
+                assert args[mksquashfs_idx + 1] == "/input"
+                assert args[mksquashfs_idx + 2].startswith("/output/")
