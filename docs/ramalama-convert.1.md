@@ -1,19 +1,24 @@
 % ramalama-convert 1
 
 ## NAME
-ramalama\-convert - convert AI Models from local storage to OCI Image
+ramalama\-convert - convert AI Models from local storage to OCI Image or squashfs
 
 ## SYNOPSIS
 **ramalama convert** [*options*] *model* [*target*]
 
 ## DESCRIPTION
-Convert specified AI Model to an OCI Formatted AI Model
+Convert specified AI Model to an OCI Formatted AI Model or a squashfs image.
 
 The model can be from RamaLama model storage in Huggingface, Ollama, or a local model stored on disk. Converting from an OCI model is not supported.
 
 Note: The convert command must be run with containers. Use of the --nocontainer option is not allowed.
 
 ## OPTIONS
+
+#### **--compression**=*gzip* | *lz4* | *zstd* | *xz*
+
+Compression algorithm to use when creating squashfs images. Only applicable when `--type=squashfs` is specified.
+The default is **zstd**.
 
 #### **--gguf**=*Q2_K* | *Q3_K_S* | *Q3_K_M* | *Q3_K_L* | *Q4_0* | *Q4_K_S* | *Q4_K_M* | *Q5_0* | *Q5_K_S* | *Q5_K_M* | *Q6_K* | *Q8_0* 
 
@@ -39,14 +44,15 @@ Image to use when converting to GGUF format (when then `--gguf` option has been 
 executable and available in the `PATH`. The script is available from the `llama.cpp` GitHub repo. Defaults to the current
 `quay.io/ramalama/ramalama-rag` image.
 
-#### **--type**=*raw* | *car*
+#### **--type**=*raw* | *car* | *squashfs*
 
-type of OCI Model Image to convert.
+type of output format for the converted model.
 
-| Type | Description                                                   |
-| ---- | ------------------------------------------------------------- |
-| car  | Includes base image with the model stored in a /models subdir |
-| raw  | Only the model and a link file model.file to it stored at /   |
+| Type     | Description                                                       |
+| -------- | ----------------------------------------------------------------- |
+| car      | Includes base image with the model stored in a /models subdir     |
+| raw      | Only the model and a link file model.file to it stored at /       |
+| squashfs | Creates a compressed squashfs image file for efficient distribution |
 
 ## EXAMPLE
 
@@ -69,6 +75,20 @@ $ ramalama convert --gguf Q4_K_M hf://ibm-granite/granite-3.2-2b-instruct oci://
 Converting /Users/kugupta/.local/share/ramalama/models/huggingface/ibm-granite/granite-3.2-2b-instruct to quay.io/kugupta/granite-3.2-q4-k-m:latest...
 Building quay.io/kugupta/granite-3.2-q4-k-m:latest...
 $ ramalama run oci://quay.io/kugupta/granite-3.2-q4-k-m:latest
+```
+
+Generate a squashfs image from an Ollama model using zstd compression.
+```
+$ ramalama convert --type=squashfs ollama://tinyllama:latest ./tinyllama.squashfs
+Converting ollama://tinyllama:latest to squashfs...
+Created squashfs image: /home/user/tinyllama.squashfs
+```
+
+Generate a squashfs image with lz4 compression from a HuggingFace model for faster decompression.
+```
+$ ramalama convert --type=squashfs --compression=lz4 hf://ibm-granite/granite-3.2-2b-instruct ./granite.squashfs
+Converting hf://ibm-granite/granite-3.2-2b-instruct to squashfs...
+Created squashfs image: /home/user/granite.squashfs
 ```
 
 ## SEE ALSO

@@ -118,4 +118,33 @@ EOF
     podman image prune --force
 }
 
+@test "ramalama convert squashfs help" {
+    run_ramalama convert --help
+    is "$output" ".*--type.*squashfs.*" "squashfs type documented"
+    is "$output" ".*--compression.*gzip.*lz4.*zstd.*xz.*" "compression options documented"
+}
+
+@test "ramalama convert to squashfs" {
+    skip_if_nocontainer
+    skip_if_ppc64le
+    skip_if_s390x
+
+    echo "test model" > $RAMALAMA_TMPDIR/testmodel
+    run_ramalama pull file://$RAMALAMA_TMPDIR/testmodel
+
+    # Test basic conversion (appends extension) and compression
+    run_ramalama convert --type=squashfs file://$RAMALAMA_TMPDIR/testmodel $RAMALAMA_TMPDIR/output
+    test -f "$RAMALAMA_TMPDIR/output.squashfs"
+    file "$RAMALAMA_TMPDIR/output.squashfs" | grep -q "Squashfs"
+
+    run_ramalama convert --type=squashfs --compression=lz4 file://$RAMALAMA_TMPDIR/testmodel $RAMALAMA_TMPDIR/lz4.squashfs
+    file "$RAMALAMA_TMPDIR/lz4.squashfs" | grep -q "Squashfs"
+}
+
+@test "ramalama convert to squashfs requires container" {
+    echo "test" > $RAMALAMA_TMPDIR/model
+    run_ramalama 22 --nocontainer convert --type=squashfs file://$RAMALAMA_TMPDIR/model $RAMALAMA_TMPDIR/out.squashfs
+    is "$output" ".*squashfs conversion requires a container engine.*"
+}
+
 # vim: filetype=sh

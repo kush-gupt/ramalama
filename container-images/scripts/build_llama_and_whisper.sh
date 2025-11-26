@@ -97,7 +97,7 @@ dnf_install() {
   local rpm_exclude_list="selinux-policy,container-selinux"
   local rpm_list=("python3-dnf-plugin-versionlock"
     "gcc-c++" "cmake" "vim" "procps-ng" "git-core"
-    "dnf-plugins-core" "libcurl-devel" "gawk")
+    "dnf-plugins-core" "libcurl-devel" "gawk" "squashfs-tools")
   local vulkan_rpms=("vulkan-headers" "vulkan-loader-devel" "vulkan-tools"
     "spirv-tools" "glslc" "glslang")
   if is_rhel_based; then

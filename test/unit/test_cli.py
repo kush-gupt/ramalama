@@ -235,3 +235,36 @@ def test_post_parse_setup_model_input(
     assert input_args.UNRESOLVED_MODEL == expected_unresolved
     assert input_args.MODEL == expected_resolved
     assert input_args.model == input_args.MODEL
+
+
+class TestConvertArgs:
+    """Tests for convert command arguments."""
+
+    @pytest.mark.parametrize(
+        "type_val,comp,exp_type,exp_comp",
+        [
+            (None, None, "raw", "zstd"),  # defaults
+            ("squashfs", "lz4", "squashfs", "lz4"),
+            ("car", "gzip", "car", "gzip"),
+        ],
+    )
+    def test_convert_type_and_compression(self, monkeypatch, type_val, comp, exp_type, exp_comp):
+        from ramalama.cli import init_cli
+
+        argv = ["ramalama", "convert"]
+        if type_val:
+            argv.append(f"--type={type_val}")
+        if comp:
+            argv.append(f"--compression={comp}")
+        argv.extend(["source", "target"])
+        monkeypatch.setattr(sys, "argv", argv)
+        _, args = init_cli()
+        assert args.type == exp_type
+        assert args.compression == exp_comp
+
+    def test_convert_invalid_compression(self, monkeypatch):
+        from ramalama.cli import init_cli
+
+        monkeypatch.setattr(sys, "argv", ["ramalama", "convert", "--compression=bzip2", "src", "tgt"])
+        with pytest.raises(SystemExit):
+            init_cli()
