@@ -1,6 +1,5 @@
 import json
 import os
-import pathlib
 import urllib.request
 
 from ramalama.common import available, perror, run_cmd
@@ -11,6 +10,7 @@ from ramalama.hf_style_repo_base import (
     fetch_checksum_from_api_base,
 )
 from ramalama.logger import logger
+from ramalama.model_store.hf_cache import find_file_in_cache, huggingface_token
 from ramalama.model_store.snapshot_file import SnapshotFileType
 from ramalama.path_utils import create_file_link
 
@@ -29,17 +29,6 @@ sudo dnf install python3-huggingface-hub
 def is_hf_cli_available():
     """Check if huggingface-cli is available on the system."""
     return available("hf")
-
-
-def huggingface_token():
-    """Return cached Hugging Face token if it exists otherwise None"""
-    token_path = os.path.expanduser(os.path.join("~", ".cache", "huggingface", "token"))
-    if os.path.exists(token_path):
-        try:
-            with open(token_path) as tokenfile:
-                return tokenfile.read().strip()
-        except OSError:
-            pass
 
 
 def extract_huggingface_checksum(data):
@@ -97,9 +86,16 @@ class HuggingfaceRepository(HFStyleRepository):
         try:
             self.model_filename = self.manifest['ggufFile']['rfilename']
             self.model_hash = self.manifest['ggufFile']['blobId']
+            self.model_type = SnapshotFileType.GGUFModel
         except KeyError:
-            perror("Repository manifest missing ggufFile data")
-            raise
+            # Fallback to safetensors
+            if 'safetensors' in self.manifest:
+                self.model_filename = self.manifest['safetensors']['rfilename']
+                self.model_hash = self.manifest['safetensors']['blobId']
+                self.model_type = SnapshotFileType.SafetensorModel
+            else:
+                perror("Repository manifest missing ggufFile or safetensors data")
+                raise
         self.mmproj_filename = self.manifest.get('mmprojFile', {}).get('rfilename', None)
         self.mmproj_hash = self.manifest.get('mmprojFile', {}).get('blobId', None)
         token = huggingface_token()
@@ -113,6 +109,13 @@ class HuggingfaceRepositoryModel(HuggingfaceRepository):
         self.blob_url = f"{HuggingfaceRepository.REGISTRY_URL}/{self.organization}/resolve/main"
         self.model_hash = f"sha256:{fetch_checksum_from_api(self.organization, self.name)}"
         self.model_filename = self.name
+        if self.name.endswith(".gguf"):
+            self.model_type = SnapshotFileType.GGUFModel
+        elif self.name.endswith(".safetensors"):
+            self.model_type = SnapshotFileType.SafetensorModel
+        else:
+            self.model_type = SnapshotFileType.Other
+
         token = huggingface_token()
         if token is not None:
             self.headers['Authorization'] = f"Bearer {token}"
@@ -171,43 +174,16 @@ class Huggingface(HFStyleRepoModel):
                 model_tag = model_tag.upper()
         return model_name, model_tag, model_organization
 
-    def _fetch_snapshot_path(self, cache_dir, namespace, repo):
-        cache_path = os.path.join(cache_dir, f'models--{namespace}--{repo}')
-        main_ref_path = os.path.join(cache_path, 'refs', 'main')
-        if not (os.path.exists(cache_path) and os.path.exists(main_ref_path)):
-            return None, None
-        with open(main_ref_path, 'r') as file:
-            snapshot = file.read().strip()
-        snapshot_path = os.path.join(cache_path, 'snapshots', snapshot)
-        return snapshot_path, cache_path
-
     def in_existing_cache(self, args, target_path, sha256_checksum):
         if not self.hf_cli_available:
             return False
 
-        default_hf_caches = [os.path.join(os.environ['HOME'], '.cache/huggingface/hub')]
-        namespace, repo = os.path.split(str(self.directory))
-
-        for cache_dir in default_hf_caches:
-            snapshot_path, cache_path = self._fetch_snapshot_path(cache_dir, namespace, repo)
-            if not snapshot_path or not cache_path or not os.path.exists(snapshot_path):
-                continue
-
-            file_path = os.path.join(snapshot_path, self.filename)
-            if not os.path.exists(file_path):
-                continue
-
-            blob_path = pathlib.Path(file_path).resolve()
-            if not os.path.exists(blob_path):
-                continue
-
-            blob_file = os.path.relpath(blob_path, start=os.path.join(cache_path, 'blobs'))
-            if str(blob_file) != str(sha256_checksum):
-                continue
-
+        blob_path = find_file_in_cache(self.directory, self.filename, sha256_checksum)
+        if blob_path:
             # Use cross-platform file linking (hardlink/symlink/copy)
-            create_file_link(str(blob_path), target_path)
+            create_file_link(blob_path, target_path)
             return True
+
         return False
 
     def push(self, _, args):
