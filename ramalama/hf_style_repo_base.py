@@ -134,7 +134,7 @@ class HFStyleRepository(ABC):
             url=f"{self.blob_url}/{self.model_filename}",
             header=self.headers,
             hash=self.model_hash,
-            type=SnapshotFileType.GGUFModel,
+            type=getattr(self, "model_type", SnapshotFileType.GGUFModel),
             name=self.model_filename,
             should_show_progress=True,
             should_verify_checksum=True,
@@ -278,12 +278,23 @@ class HFStyleRepoModel(Transport, ABC):
             repo = self.create_repository(name, organization, tag)
             snapshot_hash = repo.model_hash
             files = repo.get_file_list(cached_files)
+
+            # Check external caches for files before downloading
+            for file in files:
+                blob_path = self.model_store.get_blob_file_path(file.hash)
+                if not os.path.exists(blob_path):
+                    if self.in_existing_cache(args, blob_path, file.hash):
+                        logger.debug(f"Found {file.name} in external cache")
+
             self.model_store.new_snapshot(tag, snapshot_hash, files, verify=getattr(args, "verify", True))
 
         except EndianMismatchError:
             # No use pulling again
             raise
         except Exception as e:
+            if isinstance(e, urllib.error.HTTPError) and e.code == 404:
+                raise KeyError(f"Model not found: {str(e)}")
+
             if not available(self.get_cli_command()):
                 perror(f"URL pull failed and {self.get_cli_command()} not available")
                 raise KeyError(f"Failed to pull model: {str(e)}")

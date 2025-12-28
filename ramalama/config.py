@@ -282,7 +282,7 @@ class Config(LayeredMixin, BaseConfig):
         """
         is_podman = self.engine is not None and os.path.basename(self.engine) == "podman"
         if is_podman and sys.platform == "darwin":
-            run_with_podman_engine = apple_vm(self.engine, self)
+            run_with_podman_engine = apple_vm("podman", self)
             if not run_with_podman_engine and not self.is_set("engine"):
                 self.engine = "docker" if available("docker") else None
 
