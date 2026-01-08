@@ -1,6 +1,7 @@
 import os
 import platform
 import random
+import re
 import socket
 import subprocess
 import sys
@@ -26,7 +27,7 @@ from ramalama.config import CONFIG, DEFAULT_PORT_RANGE
 from ramalama.engine import Engine, dry_run, is_healthy, wait_for_healthy
 from ramalama.kube import Kube
 from ramalama.logger import logger
-from ramalama.model_inspect.base_info import ModelInfoBase
+from ramalama.model_inspect.base_info import ModelInfoBase, get_terminal_width
 from ramalama.model_inspect.gguf_info import GGUFModelInfo
 from ramalama.model_inspect.gguf_parser import GGUFInfoParser
 from ramalama.model_inspect.safetensor_info import SafetensorModelInfo
@@ -643,7 +644,37 @@ class Transport(TransportBase):
             if args.dryrun:
                 dry_run(exec_args)
                 return
-            exec_cmd(exec_args, stdout2null=args.noout, stderr2null=args.noout)
+
+            # Special handling for MLX runtime to show progress bars
+            if getattr(args, "runtime", None) == "mlx":
+                process = subprocess.Popen(exec_args, stderr=subprocess.PIPE, text=True, bufsize=1)
+                progress_re = re.compile(r'Prompt processing progress: (\d+)/(\d+)')
+                last_cur, term_width, stderr_lines = -1, get_terminal_width(), []
+
+                assert process.stderr  # stderr=PIPE ensures non-None
+                for line in iter(process.stderr.readline, ''):
+                    stderr_lines.append(line)
+                    match = progress_re.search(line)
+                    if match:
+                        cur, tot = int(match.group(1)), int(match.group(2))
+                        if cur != last_cur:
+                            last_cur = cur
+                            pct, bar_width = (100 * cur) // tot, max(1, term_width - 16)
+                            filled = (pct * bar_width) // 100
+                            perror(
+                                f'\r{pct:>3}% |{"█" * filled}{" " * (bar_width - filled)}| {cur}/{tot}',
+                                end='',
+                                flush=True,
+                            )
+                            if cur == tot:
+                                perror('\r\033[K', end='', flush=True)
+                    elif not args.noout:
+                        perror(line, end='')
+
+                if process.wait():
+                    raise subprocess.CalledProcessError(process.returncode, exec_args, output=''.join(stderr_lines))
+            else:
+                exec_cmd(exec_args, stdout2null=args.noout, stderr2null=args.noout)
         except FileNotFoundError as e:
             if args.container:
                 raise NotImplementedError(
