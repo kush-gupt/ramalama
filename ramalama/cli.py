@@ -44,6 +44,7 @@ from ramalama.plugins.loader import get_all_runtimes, get_runtime
 from ramalama.prompt_utils import default_prefix
 from ramalama.rag import rag_image
 from ramalama.shortnames import Shortnames
+from ramalama.stack import stack_image
 from ramalama.transports.base import (
     MODEL_TYPES,
     NoGGUFModelFileFound,
@@ -68,6 +69,11 @@ def default_image() -> str:
 @lru_cache(maxsize=1)
 def default_rag_image() -> str:
     return rag_image(ActiveConfig())
+
+
+@lru_cache(maxsize=1)
+def default_stack_image() -> str:
+    return stack_image(ActiveConfig())
 
 
 @lru_cache(maxsize=1)
@@ -211,12 +217,12 @@ def parse_args_from_cmd(cmd: list[str]) -> tuple[argparse.ArgumentParser, argpar
     args = parser.parse_args(cmd)
     post_parse_setup(args)
 
-    # Update config field that store runtime specific config which can be overridden via the cli
-    # e.g Config.image and Config.rag_image etc...
-    # TODO(owalsh): refactor this to remove runtime specific config from the global config object
     for arg in args.__dict__.keys() & config._fields:
         if getattr(args, arg) != getattr(config, arg):
             setattr(config, arg, getattr(args, arg))
+
+    runtime_plugin = get_runtime(config.runtime)
+    runtime_plugin.sync_args_to_runtime_config(args, config)
     return parser, args
 
 
@@ -836,6 +842,13 @@ def runtime_options(parser, command):
         parser.add_argument(
             "-d", "--detach", action="store_true", dest="detach", help="run the container in detached mode"
         )
+        parser.add_argument(
+            "--stack-image",
+            default=default_stack_image(),
+            help="OCI container image to run llama-stack server",
+            action=OverrideDefaultAction,
+            completer=local_images,
+        )
     parser.add_argument(
         "--device",
         dest="device",
@@ -963,10 +976,13 @@ def chat_parser(subparsers):
         default=ActiveConfig().max_tokens,
         help="maximum number of tokens to generate (0 = unlimited)",
     )
+    config = ActiveConfig()
+    rt_config = get_runtime(config.runtime).get_runtime_config(config)
+    temp_default = rt_config.temp if rt_config and hasattr(rt_config, "temp") else 0.8
     parser.add_argument(
         "--temp",
         type=float,
-        default=float(ActiveConfig().temp),
+        default=temp_default,
         help="temperature of the response from the AI model",
     )
     parser.add_argument(

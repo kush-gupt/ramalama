@@ -160,14 +160,19 @@ class RagTransport(OCI):
 
     type: str = "Model+RAG"
 
+    def format_model(self, model: str) -> str:
+        if getattr(self, "kind", None) is RagSource.DB:
+            return model
+        if "/" not in model:
+            model = f"localhost/{model}"
+        return super().format_model(model)
+
     def __init__(self, imodel: Transport, cmd: list[str], args: RagArgsType):
+        self.kind = RagSource.DB if os.path.exists(args.rag) else RagSource.IMAGE
         super().__init__(args.rag, args.store, args.engine)
+        args.rag = self.model
         self.imodel = imodel
         self.model_cmd = cmd
-        if os.path.exists(args.rag):
-            self.kind = RagSource.DB
-        else:
-            self.kind = RagSource.IMAGE
 
     def exists(self) -> bool:
         if self.kind is RagSource.DB:
@@ -226,4 +231,4 @@ class RagTransport(OCI):
 
     def wait_for_healthy(self, args: RagArgsType) -> None:
         self.imodel.wait_for_healthy(args.model_args)
-        wait_for_healthy(args, partial(is_healthy, model_name=f"{self.imodel.model_name}+rag"))
+        wait_for_healthy(args, partial(is_healthy, model_name=f"{self.imodel.model_alias}+rag"))

@@ -6,6 +6,7 @@ import platform
 import random
 import re
 import string
+import sys
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -76,8 +77,8 @@ def test_basic_dry_run():
             id="check default --name flag", marks=skip_if_no_container
         ),
         pytest.param(
-            [], r".*--cache-reuse 256", None, None, True,
-            id="check --cache-reuse default value (256)", marks=skip_if_no_container
+            [], r".*--cache-reuse", None, None, False,
+            id="check --cache-reuse not passed by default", marks=skip_if_no_container
         ),
         pytest.param(
             [], r".*--no-webui", None, None, False,
@@ -179,8 +180,8 @@ def test_basic_dry_run():
             id="check default --host value", marks=skip_if_container
         ),
         pytest.param(
-            [], r".*--cache-reuse 256", None, None, True,
-            id="check --cache-reuse default value", marks=skip_if_container
+            [], r".*--cache-reuse", None, None, False,
+            id="check --cache-reuse not passed by default", marks=skip_if_container
         ),
         pytest.param(
             ["--host", "127.0.0.1"],
@@ -209,12 +210,16 @@ def test_basic_dry_run():
             id="check --runtime-args=\"--foo='a b c'\""
         ),
         pytest.param(
-            ["--thinking", "False"], r".*--reasoning-budget 0", None, None, True,
-            id="check --reasoning-budget 0 passed to runtime",
+            ["--thinking", "False"], r".*--reasoning off", None, None, True,
+            id="check --reasoning off passed to runtime",
         ),
         pytest.param(
-            [], r".*--reasoning-budget", None, None, False,
-            id="check --reasoning-budget not passed by default",
+            ["--thinking", "True"], r".*--reasoning on", None, None, True,
+            id="check --reasoning on passed to runtime",
+        ),
+        pytest.param(
+            [], r".*--reasoning", None, None, False,
+            id="check --reasoning not passed by default",
         ),
     ],
 )
@@ -605,6 +610,8 @@ def test_serve_generation(test_model, generate, env_vars):
     with RamalamaExecWorkspace(env_vars=env_vars) as ctx:
         # Pull model
         ctx.check_call(["ramalama", "pull", test_model])
+        test_model_draft = 'hf://ggml-org/gemma-3-270m-it-qat-GGUF:Q4_0'
+        ctx.check_call(["ramalama", "pull", test_model_draft])
 
         # Define the output dir if it's required and ensure it is created
         output_dir = (
@@ -613,6 +620,8 @@ def test_serve_generation(test_model, generate, env_vars):
             else Path(ctx.workspace_dir)
         )
         output_dir.mkdir(parents=True, exist_ok=True)
+
+        extra_args = ["--model-draft", test_model_draft] if env_vars else []
 
         # Exec ramalama serve
         result = ctx.check_output(
@@ -628,7 +637,7 @@ def test_serve_generation(test_model, generate, env_vars):
                 "--generate",
                 generate.format(tmp_dir=ctx.workspace_dir, sep=os.sep),
                 test_model,
-            ]
+            ] + extra_args
         )
 
         with chdir(output_dir):
@@ -656,6 +665,12 @@ def test_serve_generation(test_model, generate, env_vars):
                     assert re.search(r".*- \"1234:1234\"", content)
                 else:
                     raise Exception("Invalid generate option")
+
+                if sys.byteorder == "little":
+                    assert len(re.findall(r'/mnt/models/smollm-135', content)) == 2
+                else:
+                    assert len(re.findall(r'/mnt/models/stories260K-be', content)) == 2
+                assert len(re.findall(r'/mnt/models/gemma-3', content)) == (2 if env_vars else 0)
 
                 if env_vars:
                     if "kube" in generate:
@@ -694,8 +709,12 @@ def test_serve_generation_with_llama_api(test_model, generate, env_vars):
     with RamalamaExecWorkspace() as ctx:
         # Pull model
         ctx.check_call(["ramalama", "pull", test_model])
+        test_model_draft = 'hf://ggml-org/gemma-3-270m-it-qat-GGUF:Q4_0'
+        ctx.check_call(["ramalama", "pull", test_model_draft])
 
         extra_args = ["--env", env_vars] if env_vars else []
+        extra_args += ["--stack-image", "quay.io/ramalama/llama-stack:0.18"] if env_vars else []
+        extra_args += ["--model-draft", test_model_draft] if not env_vars else []
         extra_args += ['--runtime-args', '--top-p 1.0']
         # Exec ramalama serve
         result = ctx.check_output(
@@ -715,7 +734,6 @@ def test_serve_generation_with_llama_api(test_model, generate, env_vars):
                 test_model,
             ] + extra_args
         )
-
         if generate == 'kube':
             # Test the expected output of the command execution
             assert re.search(r".*Generating Kubernetes YAML file: test.yaml", result)
@@ -730,9 +748,18 @@ def test_serve_generation_with_llama_api(test_model, generate, env_vars):
                 if env_vars:
                     assert len(re.findall(r"name: SEARCH_API_KEY", content)) == 2
                     assert len(re.findall(r'value: "?9999"?', content)) == 2
+                    assert len(re.findall(r'quay.io/ramalama/llama-stack:0.18', content)) == 1
                 else:
                     assert not re.search(r"name: SEARCH_API_KEY", content)
                     assert not re.search(r'value: "?9999"?', content)
+                    assert not re.search(r'quay.io/ramalama/llama-stack:0.18', content)
+
+                if sys.byteorder == "little":
+                    assert len(re.findall(r'/mnt/models/smollm-135', content)) == 2
+                else:
+                    assert len(re.findall(r'/mnt/models/stories260K-be', content)) == 2
+                assert len(re.findall(r'/mnt/models/gemma-3', content)) == (0 if env_vars else 2)
+
 
         elif generate == 'compose':
             # Test the expected output of the command execution
@@ -849,7 +876,7 @@ def test_serve_with_rag():
         assert re.search(r".*llama-server", result_a)
         assert re.search(r".*quay.io/.*-rag(@sha256)?:", result_a)
         assert re.search(r".*rag_framework serve", result_a)
-        assert re.search(r".*--mount=type=image,source=quay.io/ramalama/rag,destination=/rag,rw=true", result_a)
+        assert re.search(r".*--mount=type=image,source=quay.io/ramalama/rag:latest,destination=/rag,rw=true", result_a)
 
         result_b = ctx.check_output(
             [

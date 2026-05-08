@@ -8,11 +8,12 @@ Orchestrates two containers:
 import argparse
 import time
 from http.client import HTTPConnection, HTTPException
+from typing import Optional
 
 from ramalama.common import ensure_image, perror, set_accel_env_vars
 from ramalama.config import ActiveConfig
+from ramalama.plugins.interface import RuntimePlugin
 from ramalama.plugins.loader import assemble_command
-from ramalama.plugins.runtimes.inference.llama_cpp_commands import _NGL_DEFAULT, _default_threads
 from ramalama.transports.base import compute_serving_port
 from ramalama.transports.transport_factory import New
 
@@ -20,7 +21,7 @@ IMAGE_PARSER_MODEL = "hf://ibm-granite/granite-docling-258M-GGUF"
 EMBEDDING_MODEL = "hf://unsloth/embeddinggemma-300m-GGUF"
 
 
-def rag_handler(plugin, args: argparse.Namespace) -> None:
+def rag_handler(plugin: RuntimePlugin, args: argparse.Namespace) -> None:
     """Handle the ``ramalama rag`` subcommand."""
     from ramalama.rag import Rag
 
@@ -38,7 +39,7 @@ def rag_handler(plugin, args: argparse.Namespace) -> None:
 
     # Build serve args for the VLM and embedding servers
     vlm_ctx_size = getattr(args, "ctx_size", 8192)
-    embed_ctx_size = getattr(args, "embed_ctx_size", 8192)
+    embed_ctx_size = getattr(args, "embed_ctx_size", None)
     docling_serve_args = _build_serve_args(
         args, docling_model, docling_port, runtime_args=["--special"], ctx_size=vlm_ctx_size
     )
@@ -70,9 +71,9 @@ def rag_handler(plugin, args: argparse.Namespace) -> None:
         embed_proc = embed_transport.serve_nonblocking(embed_serve_args, embed_cmd)  # type: ignore[union-attr]
 
         if not args.dryrun:
-            _wait_for_server("127.0.0.1", int(docling_port))
+            _wait_for_server(plugin, docling_serve_args, docling_transport.model_alias)
             perror("VLM server is ready.")
-            _wait_for_server("127.0.0.1", int(embed_port))
+            _wait_for_server(plugin, embed_serve_args, embed_transport.model_alias)
             perror("Embedding server is ready.")
 
         # Determine the host URL the RAG container will use to reach llama.cpp
@@ -108,8 +109,12 @@ def rag_handler(plugin, args: argparse.Namespace) -> None:
         _cleanup_servers(args, docling_serve_args, embed_serve_args, docling_proc, embed_proc)
 
 
-def _build_serve_args(args, model_name, port, runtime_args=None, ctx_size=8192, cache_reuse=256):
+def _build_serve_args(args, model_name, port, runtime_args=None, ctx_size=None, cache_reuse=None):
     """Build argparse.Namespace for an internal llama.cpp serve session."""
+    from ramalama.plugins.loader import get_runtime
+
+    config = ActiveConfig()
+    rt_config = get_runtime("llama.cpp").get_runtime_config(config)
     return argparse.Namespace(
         MODEL=model_name,
         subcommand="serve",
@@ -122,7 +127,7 @@ def _build_serve_args(args, model_name, port, runtime_args=None, ctx_size=8192, 
         quiet=True,
         noout=True,
         image=args.image,
-        pull=getattr(args, "pull", ActiveConfig().pull),
+        pull=getattr(args, "pull", config.pull),
         network=None,
         oci_runtime=None,
         selinux=False,
@@ -138,10 +143,10 @@ def _build_serve_args(args, model_name, port, runtime_args=None, ctx_size=8192, 
         port=str(port),
         ctx_size=ctx_size,
         cache_reuse=cache_reuse,
-        ngl=getattr(args, "ngl", _NGL_DEFAULT),
-        threads=getattr(args, "threads", _default_threads()),
+        ngl=getattr(args, "ngl", None),
+        threads=getattr(args, "threads", rt_config.threads),
         temp=0.0,
-        thinking=False,
+        thinking=None,
         max_tokens=0,
         seed=None,
         webui="off",
@@ -152,26 +157,26 @@ def _build_serve_args(args, model_name, port, runtime_args=None, ctx_size=8192, 
         gguf=None,
         authfile=None,
         tlsverify=True,
-        verify=ActiveConfig().verify,
+        verify=config.verify,
     )
 
 
-def _wait_for_server(host, port, timeout=180):
+def _wait_for_server(plugin: RuntimePlugin, args: argparse.Namespace, model_alias: str, timeout: int = 180):
     """Block until a llama.cpp /health endpoint returns 200."""
     end = time.monotonic() + timeout
     while time.monotonic() < end:
+        conn: Optional[HTTPConnection] = None
         try:
-            conn = HTTPConnection(host, port, timeout=2)
-            conn.request("GET", "/health")
-            resp = conn.getresponse()
-            resp.read()
-            conn.close()
-            if resp.status == 200:
+            conn = HTTPConnection("127.0.0.1", args.port, timeout=2)
+            if plugin.service_ready_check(conn, args, model_alias):
                 return
         except (ConnectionError, HTTPException, OSError):
             pass
+        finally:
+            if conn:
+                conn.close()
         time.sleep(1)
-    raise TimeoutError(f"Server at {host}:{port} did not become ready within {timeout}s")
+    raise TimeoutError(f"Server {args.name} did not become ready on port {args.port} within {timeout}s")
 
 
 def _cleanup_servers(args, docling_serve_args, embed_serve_args, docling_proc, embed_proc):

@@ -1,12 +1,13 @@
 """CLI registration for the ``ramalama rag`` subcommand."""
 
 from ramalama.cli import OverrideDefaultAction, default_image, default_rag_image, local_images, suppressCompleter
+from ramalama.config import ActiveConfig
 from ramalama.plugins.runtimes.inference.llama_cpp import AddPathOrUrl
-from ramalama.plugins.runtimes.inference.llama_cpp_commands import _NGL_DEFAULT, _default_threads
 
 
 def register_rag_subcommand(plugin, subparsers):
     """Register the ``rag`` subcommand on the given subparsers action."""
+    rt_config = plugin.get_runtime_config(ActiveConfig())
     parser = subparsers.add_parser(
         "rag",
         help="convert documents to a RAG vector database and package as a container image",
@@ -64,9 +65,8 @@ def register_rag_subcommand(plugin, subparsers):
     parser.add_argument(
         "--ngl",
         dest="ngl",
-        type=int,
-        default=_NGL_DEFAULT,
-        help="number of layers to offload to the GPU",
+        default=None,
+        help="number of layers to store in VRAM: a number, 'auto', or 'all' (default: auto)",
         completer=suppressCompleter,
     )
     parser.add_argument(
@@ -76,13 +76,12 @@ def register_rag_subcommand(plugin, subparsers):
         action=OverrideDefaultAction,
         completer=local_images,
     )
-    def_threads = _default_threads()
     parser.add_argument(
         "-t",
         "--threads",
         type=int,
-        default=def_threads,
-        help=f"number of CPU threads to use (default: {def_threads})",
+        default=rt_config.threads,
+        help=f"number of CPU threads to use (default: {rt_config.threads})",
         completer=suppressCompleter,
     )
     parser.set_defaults(func=lambda args: _rag_dispatch(plugin, args))
