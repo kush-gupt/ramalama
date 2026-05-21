@@ -25,15 +25,6 @@
   </a>
 </p>
 
-
-<!-- <h3 align="center">
-  <a href="https://docs.ramalama.com/">Docs</a> &bull;
-  <a href="https://github.com/containers/ramalama/discussions" title="Community Page">Discussion</a> &bull;
-  <a href="https://blog.ramalama.com" title="RamaLama Blog">Blog</a>
-</h3> -->
-
-
-
 [RamaLama](https://ramalama.ai) strives to make working with AI simple, straightforward, and familiar by using OCI containers.
 <br>
 <br>
@@ -271,7 +262,8 @@ RamaLama supports multiple AI model registries types called transports.
 |                          |Examples: [`quay.io`](https://quay.io),  [`Docker Hub`](https://docker.io), [`Pulp`](https://pulpproject.org), and [`Artifactory`](https://jfrog.com/artifactory/)|
 
 ### Default Transport
-RamaLama uses the Ollama registry transport by default
+
+Models specified in the Hugging Face `<org>/<model>` format are automatically pulled from Hugging Face. For models specified without an organization (e.g. `granite-code`), RamaLama currently defaults to the Ollama transport. **Note:** Ollama models are no longer compatible with llama.cpp, and support for the Ollama transport will be removed in a future release. Users should migrate to Hugging Face models.
 
 <details>
 <summary>
@@ -313,12 +305,12 @@ RamaLama reads shortnames.conf files if they exist. These files contain a list o
 ```
 $ cat /usr/share/ramalama/shortnames.conf
 [shortnames]
-  "tiny" = "ollama://tinyllama"
-  "granite" = "huggingface://instructlab/granite-7b-lab-GGUF/granite-7b-lab-Q4_K_M.gguf"
-  "granite:7b" = "huggingface://instructlab/granite-7b-lab-GGUF/granite-7b-lab-Q4_K_M.gguf"
-  "ibm/granite" = "huggingface://instructlab/granite-7b-lab-GGUF/granite-7b-lab-Q4_K_M.gguf"
-  "merlinite" = "huggingface://instructlab/merlinite-7b-lab-GGUF/merlinite-7b-lab-Q4_K_M.gguf"
-  "merlinite:7b" = "huggingface://instructlab/merlinite-7b-lab-GGUF/merlinite-7b-lab-Q4_K_M.gguf"
+  "tiny" = "hf://TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF"
+  "granite" = "hf://ibm-granite/granite-3.3-8b-instruct-GGUF"
+  "granite:7b" = "hf://instructlab/granite-7b-lab-GGUF"
+  "ibm/granite" = "hf://ibm-granite/granite-3.3-8b-instruct-GGUF"
+  "merlinite" = "hf://instructlab/merlinite-7b-lab-GGUF"
+  "merlinite:7b" = "hf://instructlab/merlinite-7b-lab-GGUF"
   ...
 ```
 </details>
@@ -1283,15 +1275,9 @@ so if you like this tool, give some of these repos a :star:, and hey, give us a 
 
 ## Community
 
-For general questions and discussion, please use RamaLama's
+For general questions, ideas, and discussions, please use RamaLama's [Matrix room](https://matrix.to/#/#ramalama:fedoraproject.org) or [Discussions forum](https://github.com/containers/ramalama/discussions).
 
-[`Matrix`](https://matrix.to/#/#ramalama:fedoraproject.org)
-
-For discussions around issues/bugs and features, you can use the GitHub
-[Issues](https://github.com/containers/ramalama/issues)
-and
-[PRs](https://github.com/containers/ramalama/pulls)
-tracking system.
+For discussions around issues/bugs and features, you can use the GitHub [Issues](https://github.com/containers/ramalama/issues) and [PRs](https://github.com/containers/ramalama/pulls) tracking system.
 
 ### Community / Developer Meetups
 
